@@ -358,6 +358,8 @@
     'js/envolturas-esperadas.js',
     // Fila 740: la línea y el cuadro rojo de «Entrar» (docs/740-ENTRAR-DICE-DONDE-SE-QUEDA.md). Lo llama js/nucleo.js.
     'js/entrar-pasos.js',
+    // Fila 731: pasar a la dirección nueva (botón en la de siempre y lista de carpetas por señalar en la nueva). Después de js/nucleo.js.
+    'js/pasar-a-direccion-nueva.js',
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-14-42"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-15-11"><\/script>'; }).join('\n') + '\n');
 }());
