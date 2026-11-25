@@ -1,0 +1,29 @@
+/* Candidaturas al Consejo Escolar (fila 347, docs/CANDIDATURAS-CONSEJO-ESCOLAR.md). */
+.cand-campo { border: 1px solid var(--linea); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: var(--papel); }
+.cand-elegida { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.cand-nombre { overflow-wrap: anywhere; }
+.cand-barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.cand-lista-menu { position: relative; display: inline-block; }
+.cand-lista-menu .fila-menu { left: 0; right: auto; min-width: 200px; }
+.cand-bloques { display: flex; flex-direction: column; gap: 10px; }
+.cand-bloque { border: 1px solid var(--linea); border-radius: 8px; padding: 8px 10px; }
+.cand-bloque h4 { margin: 0 0 6px; font-size: 14px; }
+.cand-filas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cand-fila { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; border-top: 1px solid var(--linea); padding-top: 6px; }
+.cand-fila:first-child { border-top: 0; padding-top: 0; }
+.cand-fila-datos { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.cand-cuando { font-size: 13px; }
+.cand-docs { font-size: 13px; overflow-wrap: anywhere; }
+.cand-fila-estado { display: flex; gap: 6px; align-items: center; }
+.cand-estado { width: auto; padding: 4px 6px; }
+.cand-motivo { flex-basis: 100%; margin: 0; }
+.cand-lista-btn { cursor: pointer; }
+/* Fila 571: papeletas */
+.cand-ampa { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 10px; background: var(--fondo-suave, #eef2f7); font-size: 12px; font-weight: 600; }
+.pap-tabla { overflow-x: auto; margin: 8px 0; }
+.pap-tabla table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pap-tabla th, .pap-tabla td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--linea); }
+.pap-num { text-align: center !important; }
+.pap-papeletas { width: 90px; }
+.pap-sectores { display: flex; flex-wrap: wrap; gap: 6px; }
+.mensaje-lineas { white-space: pre-line; }

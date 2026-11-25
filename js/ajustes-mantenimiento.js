@@ -1,0 +1,110 @@
+/* ============================================================
+   ajustes-mantenimiento.js — la pestaña "Mantenimiento" de Ajustes
+   (17-sep-2026, fila 39, docs/AJUSTES-POR-TIPO.md).
+
+   Lo que no relaciona nada con nada: los avisos de vencimiento (de
+   este ordenador), las carpetas señaladas y el nombre de usuario, las
+   copias de seguridad y la papelera, sacados tal cual de
+   js/ajustes.js. La carpeta de la bandeja de correo (js/bandeja-
+   correos.js), el aviso de RegAlum.csv viejo (js/frescura.js), los
+   conflictos de Dropbox (js/conflictos.js), los duplicados
+   descartados (js/unir-asuntos.js) y las fichas sin carpeta (js/
+   fichas-huerfanas.js) se enganchan solos, como ya hacían: solo se ha
+   cambiado a qué contenedor apuntan (`#ajustes-tab-mantenimiento` en
+   vez de `#pantalla-ajustes`), no cómo funcionan por dentro.
+   ============================================================ */
+
+/* ---------- Copias de seguridad ---------- */
+
+App.pintarCopias = async function () {
+  var caja = $('tabla-copias');
+  if (!caja) return;
+  caja.innerHTML = '';
+
+  var todas;
+  try {
+    todas = await Copias.listarTodas(App.E.gestor);
+  } catch (e) {
+    caja.innerHTML = '<div class="vacio">No he podido leer las copias: ' + U.escapar(U.mensajeDeError(e)) + '</div>';
+    return;
+  }
+
+  /* La fecha de la última copia de todas, para el resumen del título
+     (fila 105, js/ajustes-plegado.js). */
+  App.E.ultimaCopia = '';
+  Copias.FICHEROS.forEach(function (nombre) {
+    var copias = todas[nombre] || [];
+    if (copias.length && copias[copias.length - 1].fecha > App.E.ultimaCopia) App.E.ultimaCopia = copias[copias.length - 1].fecha;
+    var f = document.createElement('div');
+    f.className = 'fila-tipo';
+
+    var ultima = copias.length ? copias[copias.length - 1] : null;
+    var pie = copias.length
+      ? copias.length + (copias.length === 1 ? ' copia' : ' copias') +
+        '  ·  la última, del ' + U.fechaLegible(ultima.fecha)
+      : 'Todavía sin ninguna copia';
+    f.innerHTML = '<span class="nombre-tipo">' + U.escapar(nombre) + '</span>' +
+                  '<span class="suave" style="flex:1">' + U.escapar(pie) + '</span>';
+
+    var restaurar = document.createElement('button');
+    restaurar.className = 'boton';
+    restaurar.textContent = 'Restaurar la última copia';
+    restaurar.disabled = !copias.length;
+    restaurar.onclick = async function () {
+      var ok = await U.preguntar('Restaurar ' + nombre,
+        '<p>Se cambia <strong>' + U.escapar(nombre) + '</strong> por su última copia' +
+        (ultima ? ', del ' + U.escapar(U.fechaLegible(ultima.fecha)) : '') + '.</p>' +
+        '<p class="nota">Lo que hay ahora se guarda también como copia, así que si es un ' +
+        'error se puede deshacer. Después se recarga la página.</p>', 'Restaurar');
+      if (!ok) return;
+      try {
+        await Copias.restaurar(App.E.gestor, nombre);
+        U.aviso(nombre + ' restaurado.', 'bueno');
+        location.reload();
+      } catch (e) {
+        U.aviso('No he podido restaurarlo: ' + U.mensajeDeError(e), 'malo');
+      }
+    };
+    f.appendChild(restaurar);
+    caja.appendChild(f);
+  });
+};
+
+/* ---------- Carpetas de este ordenador ---------- */
+
+App.pintarCarpetasDeEsteOrdenador = function () {
+  var carp = $('estado-carpetas');
+  if (!carp) return;
+  carp.innerHTML = '';
+  carp.appendChild(App.filaEstado('Asuntos abiertos', App.E.abiertos.name));
+  carp.appendChild(App.filaEstado('Archivo', App.E.archivo.name));
+  if (window.EntradaAjustes) EntradaAjustes.pintar($('entrada-ajustes'));   /* fila 455 */
+  if (window.PasarADriveAjustes) PasarADriveAjustes.pintar($('pasar-a-drive-ajustes'));   /* fila 458 */
+};
+
+$('btn-olvidar').onclick = async function () {
+  var ok = await U.preguntar('Volver a elegir las carpetas',
+    '<p>Se olvidan las carpetas de <strong>este</strong> ordenador. ' +
+    'No se borra ni se mueve nada.</p>', 'Olvidar');
+  if (!ok) return;
+  await Almacen.borrar('abiertos');
+  await Almacen.borrar('archivo');
+  location.reload();
+};
+
+/* ---------- el orquestador de esta pestaña ---------- */
+
+App.pintarAjustesMantenimiento = async function () {
+  App.pintarCarpetasDeEsteOrdenador();
+  if (window.SenecaAyudante) SenecaAyudante.insertarEnlace($('ayudante-seneca-ajustes'));
+  /* Fila 200, apartado 7: Copias de seguridad, Papelera y Tablas de
+     datos se pintan ahora desde la pestaña "Herramientas"
+     (App.pintarHerramientas, js/herramientas.js), no desde aquí. */
+  /* Fila 291: los problemas son tarjetas de la pestaña «Problemas» (js/problemas.js); al entrar en
+     Ajustes se calculan todas de nuevo, sin esperar los diez minutos de lo caro. */
+  if (window.CorreoVersion) CorreoVersion.preguntar(false);   /* fila 471: la versión del script, sin enviar nada */
+  if (window.Problemas) await Problemas.calcular({ forzar: true });
+  /* Fila 105: los avisos de fallo arriba (solo si hay), Herramientas
+     al final y el resumen de cada título. */
+  if (window.AjustesPlegado) AjustesPlegado.ordenarMantenimiento();
+};

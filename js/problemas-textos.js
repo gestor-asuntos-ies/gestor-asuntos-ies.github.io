@@ -1,0 +1,340 @@
+/* ============================================================
+   problemas-textos.js — los textos de cada tarjeta de «Problemas»
+   (fila 291, docs/PROBLEMAS-CON-SU-SOLUCION.md).
+
+   Solo frases, con las palabras de docs/VOCABULARIO.md. Cada función
+   devuelve la descripción de una tarjeta SIN los botones que hacen
+   algo: el módulo que detecta el problema le pone `alPulsar` a cada
+   acción, en el mismo orden (`Problemas.registrar`, js/problemas.js).
+   Un título nunca lleva «huérfano», «ficha sin carpeta», «envoltura»,
+   «json» ni el nombre de un fichero.
+   ============================================================ */
+var ProblemasTextos = (function () {
+
+  var NO_SE_SABE = 'No se sabe por qué; no es por nada que hayas hecho.';
+  var QUIEN = 'Esto lo hace quien montó la aplicación.';
+
+  function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : varios); }
+
+  function diasDeCopias() {
+    try { return window.Copias && Copias.diasCaducidad ? Copias.diasCaducidad() : 90; } catch (e) { return 90; }
+  }
+
+  /* a) El fichero de alumnado. `estado`: { falta } o { dias }. */
+  function alumnado(estado) {
+    var falta = !!estado.falta;
+    return {
+      titulo: falta ? 'Falta el fichero de alumnado' : 'El fichero de alumnado tiene ' + plural(estado.dias, 'día', 'días'),
+      que: falta ? 'No se puede buscar alumnado ni ver su contacto.'
+        : 'Los datos de contacto del alumnado y de sus familias pueden estar anticuados.',
+      porque: 'El fichero se baja de Séneca a mano y en esta época del curso cambia a menudo.',
+      urgente: falta,
+      acciones: [
+        { texto: 'Traer el alumnado', normal: true, cambia: false, id: 'problema-alumnado-traer',
+          explica: 'Abre Herramientas, donde se sube el fichero nuevo.' },
+        { texto: 'Ya lo he bajado, vuelve a mirar', cambia: false, id: 'problema-alumnado-mirar',
+          explica: 'Comprueba otra vez la fecha del fichero.' }
+      ]
+    };
+  }
+
+  /* b) Asuntos que han perdido su carpeta. `elementos`: [{ nombre, detalle }] */
+  function carpetas(elementos) {
+    var n = elementos.length;
+    var dias = diasDeCopias();
+    return {
+      titulo: n === 1 ? '1 asunto ha perdido su carpeta' : n + ' asuntos han perdido su carpeta',
+      que: 'La app tiene apuntado el asunto, pero no encuentra su carpeta en la nube.',
+      porque: 'Alguien cambió el nombre de la carpeta o la movió a mano, o el asunto se cerró y la app no se enteró.',
+      antes: 'Asunto por asunto:',
+      elementos: elementos.map(function (e) {
+        return {
+          nombre: e.nombre, detalle: e.detalle,
+          acciones: [
+            { texto: 'Buscar su carpeta', normal: true,
+              explica: 'Buscas su carpeta entre todas, las abiertas y las cerradas. El asunto conserva sus hitos y sus notas.' },
+            { texto: 'El asunto ya no existe', peligro: true,
+              explica: 'Se quita de la lista. Queda en las copias de seguridad durante ' + plural(dias, 'día', 'días') + ', por si era un error.' }
+          ]
+        };
+      })
+    };
+  }
+
+  /* c) Hitos de asuntos que ya no existen. `elementos`: [{ nombre, detalle }] */
+  function hitos(elementos) {
+    var n = elementos.length;
+    var dias = diasDeCopias();
+    return {
+      titulo: n === 1 ? 'Hay hitos guardados de 1 asunto que ya no existe con ese nombre'
+        : 'Hay hitos guardados de ' + n + ' asuntos que ya no existen con ese nombre',
+      que: 'La app guarda los hitos de cada asunto junto al nombre de su carpeta. Estos nombres ya no corresponden a ninguna carpeta.',
+      porque: 'El asunto cambió de nombre hace tiempo, o su carpeta se movió a mano.',
+      antes: 'Por cada nombre:',
+      elementos: elementos.map(function (e) {
+        return {
+          nombre: e.nombre, detalle: e.detalle,
+          acciones: [
+            { texto: 'Son de este asunto…', normal: true,
+              explica: 'Eliges el asunto al que pertenecen. Los hitos pasan a él.' },
+            { texto: 'Quitar', peligro: true,
+              explica: 'Quita esos hitos. Quedan en las copias de seguridad durante ' + plural(dias, 'día', 'días') + '.' }
+          ]
+        };
+      })
+    };
+  }
+
+  /* d) Dos ordenadores guardaron a la vez. `elementos`: [{ nombre, detalle, fila }] */
+  function conflictos(elementos) {
+    var n = elementos.length;
+    return {
+      titulo: n === 1 ? '1 cosa se guardó a la vez en dos ordenadores' : n + ' cosas se guardaron a la vez en dos ordenadores',
+      que: 'La nube ha guardado dos versiones y la app no ha podido unirlas sola.',
+      porque: 'Dos personas cambiaron lo mismo casi en el mismo momento.',
+      antes: 'Una por una:',
+      elementos: elementos.map(function (e) {
+        return {
+          nombre: e.nombre, detalle: e.detalle, queCambia: e.queCambia || undefined,
+          acciones: e.igual ? [
+            { texto: 'Resolver', explica: 'Se queda la de este ordenador. La otra se guarda en las copias de seguridad.' }
+          ] : e.fila ? [
+            { texto: 'Dejar los de este ordenador', explica: 'Se quedan los datos de este ordenador. Los del otro quedan en las copias de seguridad.' },
+            { texto: 'Quedarse con los del otro', explica: 'Se guardan los datos del otro ordenador para esta persona.' }
+          ] : [
+            { texto: 'Quedarse con el de este ordenador', explica: 'Se queda lo de este ordenador. Lo del otro se guarda en las copias de seguridad.' },
+            { texto: 'Quedarse con el otro', explica: 'Se queda lo del otro ordenador. Lo de este se guarda en las copias de seguridad.' }
+          ]
+        };
+      })
+    };
+  }
+
+  /* e) Plazo de conservación cumplido: los textos de siempre. `elementos`: [{ nombre, dato, detalle }] */
+  function conservacion(elementos) {
+    var n = elementos.length;
+    return {
+      titulo: n === 1 ? '1 asunto archivado ha cumplido su plazo de conservación'
+        : n + ' asuntos archivados han cumplido su plazo de conservación',
+      que: 'Estos asuntos del ARCHIVO ya han cumplido el plazo de su tipo. Nada se borra solo.',
+      porque: 'Cada tipo de asunto lleva su plazo de conservación, según las tablas de valoración de la Junta de Andalucía.',
+      elegir: true,
+      antes: 'Elige los que quieras:',
+      elementos: elementos,
+      acciones: [
+        { texto: 'Mandar a la papelera', id: 'btn-conservacion-papelera',
+          explica: 'Los elegidos pasan a la papelera, con su carpeta entera. Desde allí se pueden devolver a su sitio.' },
+        { texto: 'Conservar más tiempo…', id: 'btn-conservacion-mas',
+          explica: 'Apunta que los elegidos se conservan más años, contando desde hoy. Nada se borra.' }
+      ]
+    };
+  }
+
+  /* f) Una parte de la aplicación no se ha cargado bien. `detalle`: texto técnico. */
+  function envolturas(detalle) {
+    return {
+      titulo: 'Una parte de la aplicación no se ha cargado bien',
+      que: 'Algunas funciones pueden no responder.',
+      porque: NO_SE_SABE,
+      detalle: detalle,
+      soporte: 'Si al recargar sigue saliendo.',
+      acciones: [
+        { texto: 'Recargar la página', normal: true, cambia: false, id: 'problema-recargar',
+          explica: 'Vuelve a cargar la aplicación. No se pierde nada guardado.' }
+      ]
+    };
+  }
+
+  /* g) No llegan correos a la bandeja. */
+  function bandeja(dias) {
+    return {
+      titulo: 'No llegan correos a la bandeja',
+      que: 'Hace ' + plural(dias, 'día', 'días') + ' que no entra ningún correo en «Ha llegado».',
+      porque: 'Lo más probable es que el recolector de Gmail esté dejando los correos en otra carpeta de Drive con el mismo nombre.',
+      pasos: [
+        'Abre Drive y busca «GESTOR-BANDEJA». Si hay dos carpetas con ese nombre, la buena es la que está suelta en «Mi unidad», no dentro de otra carpeta.',
+        'Aquí, en Este ordenador → «Bandeja de correos», pulsa «Cambiar la carpeta» y señala la buena.',
+        'Si solo hay una, comprueba en Gmail que los correos que esperas han llegado a la cuenta común y no están en spam.',
+        'Si sigue sin llegar nada, el fallo está en el script de Google. ' + QUIEN
+      ],
+      soporte: 'Si después de esto sigue sin llegar nada.',
+      acciones: [
+        { texto: 'Ver la bandeja', cambia: false, id: 'problema-bandeja-ver', explica: 'Abre «Bandeja de correos», para cambiar la carpeta.' }
+      ]
+    };
+  }
+
+  /* h) El envío de correo está anticuado. */
+  function script() {
+    return {
+      titulo: 'El envío de correo está anticuado',
+      que: 'Los correos se siguen enviando, pero sin las últimas mejoras.',
+      porque: 'El script de Gmail que está puesto en Google es más antiguo que la aplicación.',
+      quien: QUIEN,
+      pasos: [
+        'Pulsa «Copiar el enlace del código» y pégalo en el Chrome de tu cuenta personal (la que tiene el repositorio): ' +
+          'https://github.com/fmargon780/gestor-asuntos-ies/blob/main/apps-script/gestor-correos.gs . ' +
+          'Allí copia el archivo con su botón de copiar (arriba a la derecha del código).',
+        'Pulsa «Abrir mis proyectos de Google», entra en «Gestor - Correos», borra el código que hay, pega el nuevo y guarda.',
+        'Pulsa «Implementar» → «Gestionar implementaciones» → el lápiz → «Versión: Nueva versión» → «Implementar». Así la dirección no cambia.',
+        'Vuelve aquí y recarga la página: si todo ha ido bien, esta tarjeta desaparece sola. No hace falta pulsar «Probar» ni pegar ninguna dirección.'
+      ],
+      soporte: 'Para que lo haga quien montó la aplicación.',
+      acciones: [
+        { texto: 'Copiar el enlace del código', normal: true, cambia: false, id: 'problema-script-codigo', explica: 'Copia la dirección del código en GitHub, para pegarla en el Chrome de tu cuenta personal.' },
+        { texto: 'Abrir mis proyectos de Google', cambia: false, id: 'problema-script-proyectos', explica: 'Abre script.google.com con la cuenta de Administración.' },
+        { texto: 'Ver «Enviar correo»', cambia: false, id: 'problema-script-ver', explica: 'Abre «Enviar correo».' }
+      ]
+    };
+  }
+
+  /* h1) Hay cambios de Gmail sin hacer (fila 480): la app apunta qué correos marcar como leídos, archivar o devolver a
+     recibidos y se lo manda al script; con más de un día sin salir, aviso. */
+  function gmailPendiente(n) {
+    return {
+      titulo: 'Hay ' + n + ' cambio' + (n === 1 ? '' : 's') + ' de Gmail sin hacer',
+      que: 'Algunos correos no se han marcado como leídos, archivado o devuelto a recibidos en Gmail desde hace más de un día.',
+      porque: 'El script de Gmail no ha contestado desde este ordenador (sin conexión, o todavía es una versión anterior).',
+      quien: QUIEN,
+      pasos: [
+        'Mira que este ordenador tenga conexión a internet.',
+        'Abre «Enviar correo» y pulsa «Probar». Si dice que el script está anticuado, sigue los pasos de la tarjeta «El envío de correo está anticuado».',
+        'Cuando el script conteste, esto se hace solo y la tarjeta desaparece.'
+      ],
+      soporte: 'Si después de esto no se arregla.',
+      acciones: [
+        { texto: 'Ver «Enviar correo»', cambia: false, id: 'problema-gmail-ver', explica: 'Abre «Enviar correo».' }
+      ]
+    };
+  }
+
+  /* h2) Este ordenador no trabaja con la cuenta de Administración (fila 411). `envia` y `recoge`: las cuentas conocidas ('' si no se sabe). */
+  function cuenta(admin, envia, recoge) {
+    var cuales = [];
+    if (envia) cuales.push('envía con ' + envia);
+    if (recoge) cuales.push('recoge con ' + recoge);
+    return {
+      titulo: 'Este ordenador no usa la cuenta de Administración',
+      que: 'Este ordenador ' + cuales.join(' y ') + ', y los correos del centro tienen que salir y entrar por ' + admin + '.',
+      porque: 'El script de Gmail de este ordenador está conectado a otra cuenta de Google.',
+      quien: QUIEN,
+      pasos: [
+        'Entra en script.google.com con ' + admin + ' y abre el proyecto «Gestor - Correos».',
+        'Aquí, en Este ordenador → «Enviar correo», pega la dirección de esa cuenta y pulsa «Probar».',
+        'En «Bandeja de correos», señala la carpeta GESTOR-BANDEJA del Drive de esa cuenta.'
+      ],
+      soporte: 'Para que lo haga quien montó la aplicación.',
+      acciones: [
+        { texto: 'Ver «Enviar correo»', cambia: false, id: 'problema-cuenta-ver', explica: 'Abre «Enviar correo», para ver con qué cuenta trabaja y probar el envío.' }
+      ]
+    };
+  }
+
+  /* i) La ruta más larga no cabe. `m`: lo que devuelve Nombres.medidor. */
+  function rutas(m) {
+    var clave = (m.masOcupa && m.masOcupa.clave) || '';
+    var arreglo = {
+      dropbox: 'Pon la carpeta de la nube más cerca de la raíz del disco, para que su ruta sea más corta.',
+      archivo: 'La carpeta ARCHIVO no se mueve. Acorta la ruta de la nube de este ordenador.',
+      categoria: 'Ponle un nombre más breve a la categoría más larga.',
+      tercero: 'Acorta el nombre del tercero más largo, en su ficha.',
+      tipo: 'Ponle un nombre corto más breve al tipo de asunto más largo, en los Ajustes de ese tipo.',
+      previas: 'Acorta el nombre de la subcarpeta de versiones previas.',
+      documento: 'Ponle un nombre corto más breve al tipo de documento más largo, en Lo de cada día → «Tipos de documento».'
+    }[clave] || 'Acorta lo que más ocupa.';
+    return {
+      titulo: 'La ruta más larga no cabe',
+      que: 'Algún documento puede no guardarse en este ordenador porque su ruta completa es demasiado larga: se pasa ' +
+        plural(-m.margen, 'carácter', 'caracteres') + '.',
+      porque: 'Lo que más ocupa es ' + (m.masOcupa ? m.masOcupa.texto : 'la ruta') + '.',
+      pasos: [arreglo, 'Pulsa «Volver a calcular»: si ya cabe, esta tarjeta desaparece.'],
+      acciones: [
+        { texto: 'Ver las rutas', cambia: false, id: 'problema-rutas-ver', explica: 'Abre «Largo de las rutas», con el detalle del peor caso.' },
+        { texto: 'Volver a calcular', cambia: false, id: 'problema-rutas-calcular', explica: 'Mide otra vez el margen que queda.' }
+      ]
+    };
+  }
+
+  /* j) Faltan cosas por configurar en este ordenador. */
+  function configurar(n) {
+    return {
+      titulo: n === 1 ? 'Falta 1 cosa por configurar en este ordenador' : 'Faltan ' + n + ' cosas por configurar en este ordenador',
+      que: 'Al entrar, la aplicación comprueba que tiene todo lo que necesita para trabajar en este ordenador, y algo falta.',
+      porque: 'Son cosas que se ponen una vez en cada ordenador y todavía no se han puesto.',
+      acciones: [
+        { texto: 'Verlas', normal: true, cambia: false, id: 'problema-configurar-ver',
+          explica: 'Abre la lista, con un botón «Arreglarlo» en cada una.' }
+      ]
+    };
+  }
+
+  /* k) Tareas de puesta a punto pendientes. */
+  function fichasArchivo(n) {
+    return {
+      titulo: n === 1 ? '1 ficha del ARCHIVO por poner en orden' : n + ' fichas del ARCHIVO por poner en orden',
+      que: 'La ficha de estos asuntos cerrados sigue en la lista general, en vez de en su propia carpeta.',
+      porque: 'Son asuntos cerrados antes de que cada uno llevara su ficha en su carpeta.',
+      acciones: [
+        { texto: 'Mover ' + plural(n, 'ficha', 'fichas'), normal: true, id: 'problema-fichas-mover',
+          explica: 'Baja a su propia carpeta la ficha de cada asunto cerrado. No se pierde ningún dato: se copia tal cual.' }
+      ]
+    };
+  }
+
+  function contacto(n) {
+    return {
+      titulo: n === 1 ? 'Falta guardar el contacto de 1 asunto abierto' : 'Falta guardar el contacto de ' + n + ' asuntos abiertos',
+      que: 'Estos asuntos abiertos no llevan guardada una foto del contacto de su tercero.',
+      porque: 'Se abrieron antes de que la aplicación guardara el contacto en cada asunto.',
+      acciones: [
+        { texto: 'Guardar el contacto de ' + plural(n, 'asunto', 'asuntos'), normal: true, id: 'problema-contacto-guardar',
+          explica: 'Busca al tercero de cada asunto en el fichero de hoy y guarda una foto de su contacto. Si esa persona deja de estar en el fichero, el asunto seguirá enseñando sus datos.' }
+      ]
+    };
+  }
+
+  /* Fila 327: los avisos del personal que deja el Centro de datos. `elementos`: [{ nombre, detalle }]. Cada línea
+     lleva datos de una persona: estas tarjetas nunca llevan «Avisar por Soporte». */
+  var PASOS_PERSONAL = ['Corregirlo en Séneca.', 'Bajar otra vez el listado de personal.', 'Soltarlo en el Centro de datos.'];
+  var MIRAR_PERSONAL = { texto: 'Vuelve a mirar', cambia: false, id: 'problema-personal-mirar',
+    explica: 'Trae lo nuevo del Centro de datos y comprueba otra vez.' };
+
+  function personalSinDni(elementos) {
+    var n = elementos.length;
+    return {
+      titulo: n === 1 ? '1 persona del personal viene sin DNI' : n + ' personas del personal vienen sin DNI',
+      que: 'Sale en la aplicación solo con su nombre y su puesto.',
+      porque: 'En el listado de personal de Séneca no trae DNI ni pasaporte.',
+      pasos: PASOS_PERSONAL, elementos: elementos, acciones: [Object.assign({}, MIRAR_PERSONAL)]
+    };
+  }
+
+  function personalDosListados(elementos) {
+    var n = elementos.length;
+    return {
+      titulo: n === 1 ? '1 persona sale como docente y como no docente' : n + ' personas salen como docente y como no docente',
+      que: 'La aplicación no sabe si es docente o no docente.',
+      porque: 'En Séneca está en el listado de docentes y en el de no docentes del mismo curso.',
+      pasos: PASOS_PERSONAL, elementos: elementos, acciones: [Object.assign({}, MIRAR_PERSONAL)]
+    };
+  }
+
+  function personalListado(elementos) {
+    var n = elementos.length;
+    return {
+      titulo: n === 1 ? 'Un listado de personal trae algo que revisar' : n + ' avisos de los listados de personal',
+      que: 'El Centro de datos dejó dicho algo al leer el listado.',
+      porque: 'Lo dice el propio listado; puede faltarle una columna o traer una fila rara.',
+      pasos: PASOS_PERSONAL, elementos: elementos, acciones: [Object.assign({}, MIRAR_PERSONAL)]
+    };
+  }
+
+  return {
+    personalSinDni: personalSinDni, personalDosListados: personalDosListados, personalListado: personalListado,
+    NO_SE_SABE: NO_SE_SABE, QUIEN: QUIEN, plural: plural,
+    alumnado: alumnado, carpetas: carpetas, hitos: hitos, conflictos: conflictos, conservacion: conservacion,
+    envolturas: envolturas, bandeja: bandeja, script: script, gmailPendiente: gmailPendiente, cuenta: cuenta, rutas: rutas, configurar: configurar,
+    fichasArchivo: fichasArchivo, contacto: contacto
+  };
+})();
+window.ProblemasTextos = ProblemasTextos;

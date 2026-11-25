@@ -1,0 +1,102 @@
+/* ============================================================
+   hitos-cambio-de-tipo.js — al cambiar el tipo de un asunto abierto,
+   ofrecer la guía del tipo nuevo sin perder lo trabajado (23-sep-2026,
+   fila 94, docs/CAMBIAR-EL-TIPO-CAMBIA-LA-GUIA.md).
+
+   Lo llama App.editarAsunto (js/asuntos-editar.js) al terminar bien el
+   guardado, con la clave YA nueva del asunto. Pregunta (Francisco
+   eligió preguntar: a veces se cambia el tipo solo para cambiar el
+   nombre de la carpeta) y, si dice que sí:
+
+   1. Crea los hitos de la guía del tipo nuevo (Hitos.pasoAHito).
+   2. De los viejos, los intactos (sin hacer, sin notas, sin
+      documentos, sin requisitos marcados y sin rama elegida) se quitan;
+      los que tienen algo, o están hechos, se quedan al final
+      como "noaplica" con `delTipoAnterior`, y salen plegados con los
+      huérfanos (Hitos.huerfanos), igual que al cambiar de rama.
+   3. El primero pendiente de la guía nueva pasa a "en curso".
+   4. Una nota en el asunto: «Cambiado el tipo de X a Y».
+   ============================================================ */
+window.HitosCambioDeTipo = (function () {
+
+  /* Algo apuntado en un hito, o en cualquiera de los de sus ramas. */
+  /* "En curso" solo no cuenta: la aplicación pone en curso el primero
+     pendiente sola, al crear los hitos, sin que nadie haya hecho nada. */
+  function tieneAlgo(h, conNotas) {
+    if (h.estado === 'hecho') return true;
+    if (Hitos.notasPropias(h).length) return true;
+    if (conNotas && conNotas[h.id]) return true;   /* fila 139: sus notas, en el asunto */
+    if (h.documentos && h.documentos.length) return true;
+    if ((h.requisitos || []).some(function (r) { return r.hecho || r.valor || r.documento; })) return true;
+    if (h.clase === 'decision') {
+      if (h.elegida) return true;
+      return (h.opciones || []).some(function (o) { return (o.hitos || []).some(function (x) { return tieneAlgo(x, conNotas); }); });
+    }
+    return false;
+  }
+
+  /* Sustituye los hitos de `clave` por los de la guía de `tipoNuevo`.
+     Devuelve cuántos hitos viejos se han conservado. */
+  async function traerGuia(clave, tipoViejo, tipoNuevo) {
+    var pasos = (window.GuiasDelCentro && GuiasDelCentro.pasosDe(tipoNuevo)) || [];
+    var conservados = 0;
+    var resultado = null;
+    var conNotas = window.NotasHito ? NotasHito.idsConNotas(clave) : {};   /* fila 139 */
+    await Hitos.cambiar(function (d) {
+      var entrada = d.porAsunto[clave] || { creados: U.hoyIso(), hitos: [] };
+      var quedan = entrada.hitos.filter(function (h) {
+        if (h.delTipoAnterior) return true;          /* de un cambio anterior: se queda */
+        if (!tieneAlgo(h, conNotas)) return false;
+        h.estado = 'noaplica';
+        h.delTipoAnterior = tipoViejo;
+        conservados++;
+        return true;
+      });
+      var nuevos = pasos.map(Hitos.pasoAHito);
+      entrada.hitos = nuevos.concat(quedan);
+      resultado = Hitos.recomputeEnCurso(entrada.hitos);
+      d.porAsunto[clave] = entrada;
+      return d;
+    });
+    if (resultado && Hitos.aplicarEstadoDelHito) await Hitos.aplicarEstadoDelHito(clave, resultado);
+    if (window.Notas) {
+      try {
+        await Notas.anadirAuto({ nombre: clave }, 'Cambiado el tipo de ' + tipoViejo + ' a ' + tipoNuevo +
+          ' · ' + U.fechaLegible(U.hoyIso().replace(/-/g, '').slice(2)) +
+          '. Se ha traído la guía del tipo nuevo' +
+          (conservados ? '; ' + conservados + (conservados === 1 ? ' hito viejo se queda' : ' hitos viejos se quedan') +
+            ' abajo, como «no aplica», porque tenían algo apuntado.' : '.'));
+      } catch (e) { /* no crítico */ }
+    }
+    return conservados;
+  }
+
+  /* El punto de entrada. No hace nada si el tipo no ha cambiado o si
+     el asunto no tiene hitos. Un solo U.preguntar: el cuadro de cambiar
+     ya está cerrado cuando se llega aquí. */
+  async function ofrecer(clave, tipoViejo, tipoNuevo) {
+    if (!tipoViejo || !tipoNuevo || tipoViejo === tipoNuevo) return false;
+    var hitos = await Hitos.hitosDe(clave);
+    if (!hitos.length) return false;
+    var pasos = (window.GuiasDelCentro && GuiasDelCentro.pasosDe(tipoNuevo)) || [];
+    if (!pasos.length) {
+      U.aviso('El tipo nuevo no tiene guía escrita: los hitos se quedan como estaban.', 'ambar');
+      return false;
+    }
+    var si = await U.preguntar('El tipo ha cambiado',
+      '<p class="explica">Este asunto era <b>' + U.escapar(tipoViejo) + '</b> y ahora es <b>' +
+      U.escapar(tipoNuevo) + '</b>. Sus hitos siguen siendo los del tipo viejo. ¿Traigo la guía de <b>' +
+      U.escapar(tipoNuevo) + '</b>?</p>' +
+      '<p class="explica suave">Los hitos viejos que tengan algo apuntado no se pierden: se quedan ' +
+      'abajo, plegados, como «no aplica».</p>',
+      'Traer la guía nueva', false, 'Dejar los hitos como están');
+    if (!si) return false;
+    var conservados = await traerGuia(clave, tipoViejo, tipoNuevo);
+    U.aviso('Guía de ' + tipoNuevo + ' traída.' +
+      (conservados ? ' ' + conservados + (conservados === 1 ? ' hito viejo se queda' : ' hitos viejos se quedan') +
+        ' abajo, como «no aplica».' : ''), 'bueno');
+    return true;
+  }
+
+  return { ofrecer: ofrecer, traerGuia: traerGuia, tieneAlgo: tieneAlgo };
+})();

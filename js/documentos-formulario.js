@@ -1,0 +1,388 @@
+/* ============================================================
+   documentos-formulario.js — el formulario del nombre del documento, los campos de su tipo y la lista de tipos.
+
+   Sacado tal cual de js/documentos.js en la fila 133
+   (docs/PARTIR-FICHEROS-GRANDES.md), sin cambiar nada de lo que hace.
+   El estado del cuadro y lo de los demás ficheros se pide a
+   `Documentos._interno` (N). Se carga justo detrás de js/documentos.js.
+   ============================================================ */
+(function () {
+  if (typeof Documentos === 'undefined' || !Documentos._interno) return;
+  var N = Documentos._interno;
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ---------- el formulario del nombre ---------- */
+
+  N.ultimasOpciones = null;
+  N.ultimoTipo = '';       /* el tipo elegido antes de abrir el cuadro de crear uno */
+
+  /* El valor de la opción que abre el cuadro de crear un tipo nuevo.
+     No es un tipo: son dos guiones bajos a cada lado para que no pueda
+     coincidir nunca con uno de verdad. */
+  N.TIPO_NUEVO = '__nuevo__';
+
+  /* "dd/mm/aaaa" (lo que da LectorDocumentos.analizar) -> ISO. Cadena
+     vacía si no se entiende: cada fichero que lo necesita tiene su
+     propia copia mínima (fila 174, docs/POR-CLASIFICAR-USA-LO-LEIDO.md),
+     en vez de forzar una sola en js/util.js. */
+  function isoDeFechaLector(ddmmaaaa) {
+    var p = String(ddmmaaaa || '').split('/');
+    return p.length === 3 ? p[2] + '-' + p[1] + '-' + p[0] : '';
+  }
+
+  /* El último tipo de documento guardado en un asunto de cada tipo de
+     asunto, en este ordenador (fila 174, punto 1): cuando el lector no
+     lee el tipo de documento (nunca lo lee) y el nombre tampoco lo trae,
+     el desplegable arranca ahí en vez de en el primero de la lista. */
+  var CLAVE_ULTIMO_TIPO_DOC = 'gestor-ultimo-tipo-doc';
+  function ultimoTipoDocumento(tipoAsunto) {
+    if (!tipoAsunto) return '';
+    try {
+      var m = JSON.parse(window.localStorage.getItem(CLAVE_ULTIMO_TIPO_DOC) || '{}');
+      return m[tipoAsunto] || '';
+    } catch (e) { return ''; }
+  }
+  N.guardarUltimoTipoDocumento = function (tipoAsunto, tipoDocumento) {
+    if (!tipoAsunto || !tipoDocumento) return;
+    try {
+      var m = JSON.parse(window.localStorage.getItem(CLAVE_ULTIMO_TIPO_DOC) || '{}');
+      m[tipoAsunto] = tipoDocumento;
+      window.localStorage.setItem(CLAVE_ULTIMO_TIPO_DOC, JSON.stringify(m));
+    } catch (e) { /* sin memoria, como si no se hubiera guardado nunca */ }
+  };
+
+  /* La regla de prioridad del apartado 4 (28-sep-2026, fila 201,
+     docs/NOMBRE-DE-DOCUMENTO-PROPUESTO.md): pura, sin DOM ni async, para
+     poder probarla sin navegador. Vale tanto para el tipo de documento
+     como para el texto adicional: "lo que ya trae el nombre" manda
+     sobre "lo del hito", que manda sobre "lo del tipo de documento (o
+     la memoria, para el tipo)"; sin ninguno de los tres, vacío. Quien
+     llama ya tiene que traer `delHito`/`delTipo` con sus huecos
+     rellenos (`Plantillas.rellenar`): esta función no sabe nada de
+     plantillas ni de asuntos. */
+  N.propuestaDesdeHito = function (datos) {
+    var d = datos || {};
+    return String(d.delNombre || d.delHito || d.delTipo || '');
+  };
+
+  async function pintarFormulario(opciones) {
+    var caja = $('doc-cuerpo');
+    if (!caja) return;
+    N.ultimasOpciones = opciones;   /* lo usa la vista previa */
+
+    /* El documento, para poder verlo mientras se le pone el nombre. */
+    var fichero = null;
+    try {
+      var h = opciones.handle ||
+              await N.asuntoActual.handle.getFileHandle(opciones.nombreActual);
+      fichero = await h.getFile();
+    } catch (e) { fichero = null; }
+    var visor = fichero ? N.visorDe(fichero, opciones.nombreActual)
+                        : '<p class="explica">No he podido abrir el documento para verlo.</p>';
+
+    var previo = N.leerNombre(opciones.nombreVista || opciones.nombreActual, N.asuntoActual && N.asuntoActual.ficha);   /* fila 661: `nombreVista`, el nombre con que se vería un adjunto de correo en la carpeta */
+    /* Fila 239 (docs/NOMBRES-FIJOS-CON-NUMERO.md): un documento que ya
+       tiene número lo conserva; uno que entra ahora en la carpeta
+       (añadido desde el ordenador o traído de «Por clasificar») recibe el
+       siguiente, o el que ya se dio a ese mismo fichero si se guarda en
+       otro asunto. Cambiar el nombre a un documento de antes (que ya
+       sigue la norma de siempre: fecha y tipo), sin número, sigue con la
+       estructura de siempre. */
+    if (opciones.numeroDoc === undefined) {
+      opciones.numeroDoc = previo.numero || '';
+      opciones.numeroNuevo = false;
+      opciones.claveOrigen = Numeros.claveDeOrigen({ name: opciones.nombreActual, size: fichero ? fichero.size : 0, lastModified: fichero ? fichero.lastModified : 0 });
+      if (!opciones.numeroDoc && (opciones.modo === 'anadir' || (opciones.ponerNombre && !previo.fecha))) {
+        var yaDado = Numeros.deOrigen(opciones.claveOrigen);
+        try {
+          opciones.numeroDoc = yaDado || await Numeros.proximo('documentos');
+          opciones.numeroNuevo = !yaDado;
+        } catch (eNum) {
+          opciones.numeroDoc = '';
+          U.aviso('No he podido calcular el número del documento: ' + U.mensajeDeError(eNum), 'malo');
+        }
+      }
+    }
+    /* Lo que ya trae el nombre del fichero manda: la propuesta solo
+       rellena lo que el nombre no trae (fila 174, punto 1). */
+    var propuesta = opciones.propuesta || null;
+    var hoy = U.hoyIso();
+    var fechaPropuesta = propuesta && propuesta.fecha ? isoDeFechaLector(propuesta.fecha) : '';
+    var fecha = previo.fecha || fechaPropuesta || hoy;
+    /* El tipo de documento: si el nombre no lo trae, el del hito desde
+       el que se añade o nombra el documento, si lo tiene (fila 201,
+       apartado 4); si no, el último que se guardó en un asunto de este
+       mismo tipo de asunto (fila 174, punto 1); si no, el primero de la
+       lista, como siempre (lo decide `opcionesDeTipo` al no marcar
+       ninguna opción). */
+    var tipoAsunto = N.asuntoActual ? App.tipoDeAsunto(N.asuntoActual) : '';
+    var hito = N.hitoActual;
+    /* Fila 347: en el asunto de unas elecciones, el tipo de documento arranca en SOLICITUD DE CANDIDATURA. */
+    if (window.Candidaturas) await Candidaturas.preparar(opciones, N.asuntoActual);
+    var tipoInicial = N.propuestaDesdeHito({
+      delNombre: previo.tipo,
+      delHito: hito ? hito.tipoDocumento : (N.tipoPropuesto || ''),   /* fila 703: «Añadir documento» de una tarea de papel propone su tipo */
+      delTipo: (window.Candidaturas && Candidaturas.tipoPorDefecto(opciones, N.asuntoActual)) || ultimoTipoDocumento(tipoAsunto)
+    });
+    /* El texto adicional del nombre (fila 201, apartado 4): el que ya
+       trae el nombre manda (igual que siempre); si no, el del hito, con
+       sus huecos ya rellenos (apartado 1: el mismo motor que una
+       plantilla, `Plantillas.rellenar`); si no, el del tipo de
+       documento ya elegido, también con sus huecos; si no, vacío. Antes
+       se llamaba "Año académico" y se rellenaba solo con el curso que
+       tocaba por la fecha; desde el 10-sep-2026 es texto libre, y desde
+       esta fila puede venir ya escrito de otro sitio, pero se sigue
+       pudiendo cambiar antes de guardar. */
+    var textoDelTipoBruto = (window.Campos && window.Campos.textoPorDefectoDeDocumento && window.App && App.E)
+      ? Campos.textoPorDefectoDeDocumento(App.E.campos, tipoInicial) : '';
+    var textoDelHitoBruto = (hito && hito.textoDocumentos) || '';
+    var textoRelleno = { delHito: textoDelHitoBruto, delTipo: textoDelTipoBruto };
+    if ((textoDelHitoBruto || textoDelTipoBruto) && window.Plantillas && N.asuntoActual) {
+      try {
+        var valoresHuecos = await Plantillas.valoresDeAsunto(N.asuntoActual, { hito: hito, conLoQueFalta: false });
+        if (textoDelHitoBruto) textoRelleno.delHito = Plantillas.rellenar(textoDelHitoBruto, valoresHuecos).texto;
+        if (textoDelTipoBruto) textoRelleno.delTipo = Plantillas.rellenar(textoDelTipoBruto, valoresHuecos).texto;
+      } catch (e) { /* sin poder rellenar los huecos, se deja el texto tal cual está escrito */ }
+    }
+    var curso = N.propuestaDesdeHito({
+      delNombre: previo.curso,
+      delHito: textoRelleno.delHito,
+      delTipo: textoRelleno.delTipo
+    });
+    /* Los campos del tipo de documento (fila 96): los de lista que ya
+       estén, tal cual, al principio del texto adicional se reconocen y
+       salen de ahí; el resto se queda como texto adicional. */
+    var valoresIniciales = {};
+    var camposIniciales = camposDelTipo(tipoInicial);
+    if (previo.numero && previo.valoresDeCampos) {
+      valoresIniciales = previo.valoresDeCampos;   /* fila 239: salen de la ficha, no del texto */
+    } else if (camposIniciales.length) {
+      var rec = DocCampos.reconocer(camposIniciales, curso);
+      valoresIniciales = rec.valores;
+      curso = rec.resto;
+    }
+    /* Fila 670: sale ya marcada si el documento ya cuelga de una tarea «Registrar» sin hacer. */
+    var hayQueInicial = false, hitoDelDoc = '';
+    if (window.HayQueRegistrarlo && opciones.modo === 'renombrar') {
+      try {
+        hayQueInicial = await HayQueRegistrarlo.cuelga(N.asuntoActual, opciones.nombreActual);
+        hitoDelDoc = await HayQueRegistrarlo.hitoDelDocumento(N.asuntoActual, opciones.nombreActual);
+      } catch (eHq) { hayQueInicial = false; }
+    }
+    N.hitoDelDocumento = hitoDelDoc;
+    /* El desplegable «Hito» solo si no se sabe el hito: ni el del cuadro, ni el del documento, ni la bandeja, ni la pregunta de «¿De qué tarea es?». */
+    var pideHito = !opciones.desdeBandeja && !N.hitoActual && !hitoDelDoc &&
+      !(opciones.modo === 'anadir' && N.preguntarTarea && window.DocumentoATarea);
+
+    /* El registro: el que ya trae el nombre manda; si no, el leído del
+       sello de Séneca (misma forma que usa js/registro.js). */
+    var registroLeido = !previo.registro && propuesta && propuesta.registro ? propuesta.registro : null;
+    var registro = previo.registro || (registroLeido ? {
+      ano: registroLeido.anio, sentido: registroLeido.tipo, modo: registroLeido.serie, numero: registroLeido.numero
+    } : null);
+
+    caja.innerHTML =
+      '<div class="doc-partido">' +
+
+      '<div>' +
+        '<div class="visor-barra">' +
+          '<button type="button" class="boton" id="doc-ampliar">Ver más grande</button>' +
+        '</div>' +
+        '<div class="visor">' + visor + '</div>' +
+      '</div>' +
+
+      '<div class="doc-campos">' +
+
+      (opciones.serieAdjuntos && opciones.serieAdjuntos.total ? '<p class="nota">Correo de ' + U.escapar(opciones.serieAdjuntos.quien || '') +
+        ' · adjunto ' + (opciones.serieAdjuntos.total - opciones.serieAdjuntos.restantes.length) + ' de ' + opciones.serieAdjuntos.total + '</p>' : '') +   /* fila 661 */
+      '<p class="explica">' +
+        (opciones.desdeBandeja
+          ? 'El documento entra en el asunto al pulsar «Guardar».'   /* fila 661: hasta entonces sigue en «Por clasificar» */
+          : opciones.modo === 'anadir'
+          ? 'Se guardará una copia en la carpeta del asunto. El original se queda donde está.'
+          : 'Se le cambia el nombre al fichero que ya está en la carpeta.') +
+        '<br><span class="suave">Fichero: ' + U.escapar(opciones.nombreVista || opciones.nombreActual) + '</span></p>' +
+
+      (window.Candidaturas ? Candidaturas.campoHTML(opciones, N.asuntoActual) : '') +   /* fila 347 */
+
+      '<div class="dos-columnas">' +
+        '<div>' +
+          '<label class="etiqueta">Fecha del documento</label>' +
+          '<input type="date" id="doc-fecha" class="campo" value="' + fecha + '">' +
+          '<p class="nota">La que trae el documento, no la de hoy.</p>' +
+        '</div>' +
+        '<div>' +
+          '<label class="etiqueta">Texto adicional <span class="suave">(opcional)</span></label>' +
+          '<input id="doc-curso" class="campo" value="' + U.escapar(curso) + '">' +
+          '<p class="nota">Va a la ficha del documento, no a su nombre: el curso, una referencia…</p>' +
+        '</div>' +
+      '</div>' +
+
+      '<label class="etiqueta">Tipo de documento</label>' +
+      '<select id="doc-tipo" class="campo">' + opcionesDeTipo(tipoInicial) + '</select>' +
+      '<div id="doc-campos-tipo"></div>' +
+      (opciones.desdeBandeja && window.DocumentoTareaBloque ? DocumentoTareaBloque.html() : '') +   /* fila 661: «¿De qué tarea es?» */
+
+      '<label class="interruptor">' +
+        '<input type="checkbox" id="doc-hay-registro"' + (registro ? ' checked' : '') + '>' +
+        '<span>Está registrado en Séneca</span>' +
+      '</label>' +
+
+      '<label class="interruptor' + (registro ? ' oculto' : '') + '" id="doc-fila-hay-que-registrar">' +
+        '<input type="checkbox" id="doc-hay-que-registrar"' +
+          (hayQueInicial ? ' checked' : '') + '>' +
+        '<span>Hay que registrarlo</span>' +
+      '</label>' +
+      (pideHito && window.HayQueRegistrarlo ? HayQueRegistrarlo.html() : '') +   /* fila 670 */
+
+      '<div id="doc-registro" class="' + (registro ? '' : 'oculto') + '">' +
+        (registroLeido ? '<p class="aviso-bueno" id="doc-registro-leido">Leído del sello de Séneca.</p>' : '') +
+        '<div class="registro-campos">' +
+          '<div>' +
+            '<label class="etiqueta">Año</label>' +
+            '<input id="doc-ano" class="campo" maxlength="2" value="' +
+              U.escapar(registro ? registro.ano : fecha.slice(2, 4)) + '">' +
+          '</div>' +
+          '<div>' +
+            '<label class="etiqueta">Entrada o salida</label>' +
+            '<div class="opciones">' +
+              N.botonOpcion('doc-sentido', 'E', 'Entrada', !registro || registro.sentido !== 'S') +
+              N.botonOpcion('doc-sentido', 'S', 'Salida', !!registro && registro.sentido === 'S') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<label class="etiqueta">Serie</label>' +
+            '<div class="opciones">' +
+              N.botonOpcion('doc-modo', 'M', 'Manual', !registro || registro.modo !== 'A') +
+              N.botonOpcion('doc-modo', 'A', 'Automático', !!registro && registro.modo === 'A') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<label class="etiqueta">Número</label>' +
+            '<input id="doc-numero" class="campo" maxlength="6" inputmode="numeric" value="' +
+              U.escapar(registro ? registro.numero : '') + '">' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div id="doc-pdf-ajuste"></div>' +   /* fila 349: hojas grandes / firma electrónica */
+      '<div class="vista-previa">' +
+        '<div class="vista-rotulo">Se guardará así</div>' +
+        '<div id="doc-vista" class="vista-nombre"></div>' +
+      '</div>' +
+
+      (window.Esperas ? Esperas.casillaHTML(opciones, N.asuntoActual, N.hitoActual) : '') +   /* fila 286 */
+      '<div class="cuadro-botones">' +
+        '<button type="button" class="boton" id="doc-volver">Volver</button>' +
+        '<button type="button" class="boton boton-principal" id="doc-guardar">Guardar</button>' +
+      '</div>' +
+
+      '</div></div>';
+
+    /* La última opción de la lista de tipos no es un tipo: abre el cuadro
+       de crear uno. Se engancha antes que el refresco general para que la
+       vista previa no llegue a enseñar el nombre postizo. */
+    N.ultimoTipo = $('doc-tipo').value;
+    pintarCamposDelTipo(valoresIniciales);
+    $('doc-tipo').addEventListener('change', function () {
+      var sel = $('doc-tipo');
+      if (sel.value !== N.TIPO_NUEVO) { N.ultimoTipo = sel.value; pintarCamposDelTipo(); return; }
+      sel.value = N.ultimoTipo || (N.ctx.tipos()[0] || '');
+      N.abrirCuadroDeTipoNuevo();
+    });
+
+    /* refrescar la vista previa con cualquier cambio */
+    Array.prototype.forEach.call(caja.querySelectorAll('input, select'), function (c) {
+      c.oninput = N.refrescar;
+      c.onchange = N.refrescar;
+    });
+    /* La fecha ya no toca el texto adicional: son dos campos
+       independientes, y escribir en uno no puede pisar el otro. */
+    $('doc-hay-registro').onchange = function () {
+      var hay = $('doc-hay-registro').checked;
+      $('doc-registro').classList.toggle('oculto', !hay);
+      $('doc-fila-hay-que-registrar').classList.toggle('oculto', hay);
+      mostrarHitoDeRegistrar();
+      N.refrescar();
+    };
+    function mostrarHitoDeRegistrar() {
+      if (window.HayQueRegistrarlo) HayQueRegistrarlo.mostrar(!$('doc-hay-registro').checked && $('doc-hay-que-registrar').checked);
+    }
+    $('doc-hay-que-registrar').addEventListener('change', mostrarHitoDeRegistrar);
+    if (pideHito && window.HayQueRegistrarlo) { await HayQueRegistrarlo.montar($('doc-registrar-hito'), N.asuntoActual); mostrarHitoDeRegistrar(); }
+
+    /* Esconde los campos para que el documento ocupe toda la ventana. */
+    $('doc-ampliar').onclick = function () {
+      var partido = caja.querySelector('.doc-partido');
+      var ampliado = partido.classList.toggle('solo-visor');
+      $('doc-ampliar').textContent = ampliado ? 'Volver a los campos' : 'Ver más grande';
+    };
+
+    /* Fila 347: después del repaso de arriba, que pone su `oninput` a todos los campos del cuadro. */
+    if (window.Candidaturas) Candidaturas.enganchar(opciones, N.asuntoActual);
+
+    /* Fila 661: desde la bandeja, «Volver» no guarda nada y cierra el cuadro: el documento sigue en «Por clasificar». */
+    $('doc-volver').onclick = function () { N.soltarVisor(); if (opciones.desdeBandeja) N.cerrarCuadro(); else N.pintarLista(); };
+    $('doc-guardar').onclick = function () {
+      return U.mientrasGuarda($('doc-guardar'), function () { return N.guardar(opciones); });
+    };
+    /* Fila 661: el bloque «¿De qué tarea es?», con el hito y la tarea de donde se llega, si se llega de uno. */
+    if (opciones.desdeBandeja && window.DocumentoTareaBloque) {
+      await DocumentoTareaBloque.montar($('doc-tarea-bloque'), N.asuntoActual, { tipo: N.tipoElegido, hito: N.hitoActual, tarea: N.tareaActual });
+    }
+    /* Fila 349: un PDF que entra, con hojas grandes o de más de 5 MB. */
+    if (window.DocumentosPdf) DocumentosPdf.pintar(opciones, fichero);
+    N.refrescar();
+  }
+
+  /* ---------- los campos del tipo de documento (fila 96) ---------- */
+
+  function camposDelTipo(tipo) {
+    return (window.DocCampos && tipo && tipo !== N.TIPO_NUEVO) ? DocCampos.campos(tipo) : [];
+  }
+
+  function tipoElegido() {
+    var sel = $('doc-tipo');
+    var tipo = sel ? sel.value : '';
+    return tipo === N.TIPO_NUEVO ? (N.ultimoTipo || '') : tipo;
+  }
+
+  /* Pinta los campos del tipo elegido. Sin `valores`, conserva lo ya
+     escrito en los que se repiten (mismo id). */
+  function pintarCamposDelTipo(valores) {
+    var caja = $('doc-campos-tipo');
+    if (!caja || !window.DocCampos) return;
+    var antes = valores || DocCampos.leerDe(caja);
+    DocCampos.pintar(caja, camposDelTipo(tipoElegido()), antes);
+    Array.prototype.forEach.call(caja.querySelectorAll('input, select'), function (c) {
+      c.oninput = N.refrescar;
+      c.onchange = N.refrescar;
+    });
+    N.refrescar();
+  }
+
+  function valoresDeCampos() {
+    return window.DocCampos ? DocCampos.leerDe($('doc-campos-tipo')) : {};
+  }
+
+  /* ---------- la lista de tipos de documento ---------- */
+
+  function opcionesDeTipo(elegido) {
+    return N.ctx.tipos().map(function (t) {
+      return '<option value="' + U.escapar(t) + '"' +
+             (U.normalizar(t) === U.normalizar(elegido) ? ' selected' : '') + '>' +
+             U.escapar(t) + '</option>';
+    }).join('') +
+    '<option value="' + N.TIPO_NUEVO + '">+  Crear un tipo nuevo…</option>';
+  }
+
+  Object.assign(N, {
+    pintarFormulario: pintarFormulario,
+    camposDelTipo: camposDelTipo,
+    tipoElegido: tipoElegido,
+    pintarCamposDelTipo: pintarCamposDelTipo,
+    valoresDeCampos: valoresDeCampos,
+    opcionesDeTipo: opcionesDeTipo
+  });
+})();

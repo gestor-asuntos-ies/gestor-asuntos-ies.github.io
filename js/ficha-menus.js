@@ -1,0 +1,118 @@
+/* ============================================================
+   ficha-menus.js — el menú pequeño y reutilizable de la cabecera de un
+   asunto (18-sep-2026, fila 52, docs/CABECERA-DEL-ASUNTO.md, 5 y 9):
+   lo usan los tres puntos del nombre y "Comunicar".
+
+   Un botón que ya está en la página abre, al lado, una lista de
+   opciones. Se cierra con Escape, pulsando fuera, o al elegir una:
+   solo puede haber uno abierto a la vez, así que abrir uno cierra
+   cualquier otro que hubiera quedado abierto.
+
+   No sabe nada de asuntos ni de correo: monta el botón disparador con
+   la lista que le pasen (`{texto, clase, deshabilitado, title, raya,
+   alPulsar}`) y ya está. Iguales en espíritu a `U.menuDeAcciones`
+   (js/util.js), que hace lo mismo para el menú de tres puntos de un
+   documento: se escribe aparte porque esta fila lo pide como fichero
+   propio (docs/CABECERA-DEL-ASUNTO.md, 14). */
+var FichaMenus = (function () {
+
+  var abierto = null;   /* { envoltorio, menu } del menú visible, o null */
+
+  function cerrar() {
+    if (!abierto) return;
+    abierto.menu.classList.add('oculto');
+    abierto = null;
+  }
+
+  document.addEventListener('mousedown', function (ev) {
+    if (abierto && !abierto.envoltorio.contains(ev.target)) cerrar();
+  }, true);
+
+  /* En captura, y parando la tecla: por debajo, js/usabilidad.js
+     también escucha Escape en el documento entero y, sin nada más
+     abierto, la usa para volver a la pantalla anterior (pulsa
+     `#ficha-volver`). Sin `stopPropagation` aquí, cerrar este menú con
+     Escape se llevaba por delante la ficha entera (mismo cuidado que
+     ya toma js/huecos-buscador.js). */
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape' || !abierto) return;
+    ev.stopPropagation();
+    cerrar();
+  }, true);
+
+  /* `disparador` es el botón que ya está en la página (se envuelve tal
+     cual, sin moverlo de sitio). `opciones` es la lista de entradas del
+     menú, en orden. Devuelve `{ cerrar }`, por si hiciera falta cerrar
+     desde fuera. Llamar de nuevo sobre el mismo `disparador` (por
+     ejemplo, tras un repintado que lo haya dejado igual) no duplica
+     nada: cada llamada monta su propio envoltorio y menú nuevos. */
+  function montar(disparador, opciones) {
+    var envoltorio = document.createElement('span');
+    envoltorio.className = 'ficha-menu-envoltorio';
+    disparador.parentNode.insertBefore(envoltorio, disparador);
+    envoltorio.appendChild(disparador);
+
+    var menu = document.createElement('div');
+    menu.className = 'ficha-menu oculto';
+    var porClave = {};
+    (opciones || []).forEach(function (o) {
+      if (o.rotulo) {   /* fila 637: un título pequeño dentro del menú («Copiar») */
+        var rot = document.createElement('div');
+        rot.className = 'ficha-menu-rotulo';
+        rot.textContent = o.rotulo;
+        menu.appendChild(rot);
+        return;
+      }
+      if (o.raya) {
+        var raya = document.createElement('hr');
+        raya.className = 'ficha-menu-raya';
+        menu.appendChild(raya);
+        return;
+      }
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'ficha-menu-opcion' + (o.clase ? ' ' + o.clase : '');
+      item.textContent = o.texto;
+      item.disabled = !!o.deshabilitado;
+      if (o.oculto) item.hidden = true;   /* fila 637: se enseña luego con `item(clave).hidden = false` */
+      if (o.clave) { porClave[o.clave] = item; item.dataset.clave = o.clave; }   /* fila 701: para enseñar «Cambiar la guía…» solo en un asunto sin hitos */
+      if (o.soloLectura) item.setAttribute('data-solo-lectura', '');   /* fila 637: copiar sigue encendido en solo consulta */
+      if (o.title) item.title = o.title;   /* fila 206: el motivo de una opción apagada */
+      item.onclick = function () {
+        cerrar();
+        o.alPulsar();
+      };
+      menu.appendChild(item);
+    });
+    envoltorio.appendChild(menu);
+
+    var propio = { envoltorio: envoltorio, menu: menu };
+    disparador.onclick = function (ev) {
+      ev.stopPropagation();
+      var yaAbierto = abierto === propio;
+      cerrar();
+      if (yaAbierto) return;
+      menu.classList.remove('oculto');
+      /* Fila 439: si no cabe por debajo (borde de la ventana o de la tarjeta con desplazamiento), se abre hacia arriba. */
+      menu.classList.remove('ficha-menu-arriba');
+      var limite = window.innerHeight, p = envoltorio.parentNode;
+      while (p && p !== document.body) {
+        var o = getComputedStyle(p).overflowY;
+        if (o === 'auto' || o === 'scroll' || o === 'hidden') { limite = Math.min(limite, p.getBoundingClientRect().bottom); break; }
+        p = p.parentNode;
+      }
+      var m = menu.getBoundingClientRect(), b = disparador.getBoundingClientRect();
+      if (m.bottom > limite && b.top - m.height - 4 > 0) menu.classList.add('ficha-menu-arriba');
+      /* Fila 603: el menú nunca queda bajo la barra lateral; si al abrirse hacia la izquierda no cabe, se corre hacia la derecha. */
+      menu.classList.remove('ficha-menu-derecha');
+      var lat = document.querySelector('.lateral');
+      var borde = lat ? lat.getBoundingClientRect().right : 0;
+      if (menu.getBoundingClientRect().left < borde) menu.classList.add('ficha-menu-derecha');
+      abierto = propio;
+    };
+
+    return { cerrar: function () { if (abierto === propio) cerrar(); }, item: function (clave) { return porClave[clave] || null; } };
+  }
+
+  return { montar: montar };
+})();

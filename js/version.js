@@ -1,0 +1,34 @@
+/* ============================================================
+   version.js — la fecha y la hora de la última versión publicada.
+
+   Sale en la pantalla de entrada y, ya dentro, abajo a la izquierda
+   debajo del nombre. Sirve para saber de un vistazo si se está mirando
+   lo último: si la hora no es la del último cambio, o Vercel no ha
+   publicado todavía, o el navegador se ha quedado con la página vieja.
+
+   La hora es la de España, la del reloj de Francisco.
+
+   Va en su propio fichero, cargado justo después de js/nucleo.js, para
+   que cambiar la versión no obligue a resubir nucleo.js entero: es de
+   los ficheros más grandes, y cada subida es una publicación de Vercel
+   que hace cola con las demás.
+
+   DESDE LA FILA 76 (25-sep-2026, docs/VERSION-AL-PUBLICAR.md) la web
+   la pone sola: al publicar, Vercel ejecuta scripts/version-al-publicar.mjs
+   (el `buildCommand` de vercel.json), que cambia la línea de abajo por
+   la hora de España de ese momento en lo que va a servir, sin ningún
+   commit. La escrita aquí es la que ven la copia sin internet (se
+   genera de este fichero y solo se actualiza si cambia) y quien abra
+   index.html en local: por eso se sigue poniendo en cada subida.
+
+   OJO al escribir esta línea: nunca a ojo ni sumando algo al valor de
+   antes (17-sep-2026 y 6-nov-2026, avisos de Francisco: salían horas por
+   delante de la real). DESDE LA FILA 549 se escribe con el programa, que
+   coge el reloj de España; en la terminal:
+
+       node scripts/poner-version.mjs
+
+   Una prueba (pruebas/hora-de-la-version.mjs) falla si la hora escrita
+   va más de 15 minutos por delante de la real.
+   ============================================================ */
+App.VERSION = '25-nov-2026 · 14:42';

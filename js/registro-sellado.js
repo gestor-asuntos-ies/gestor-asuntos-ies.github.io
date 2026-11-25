@@ -1,0 +1,351 @@
+/* ============================================================
+   registro-sellado.js — ver un papel que ya trae el sello del
+   registro, dentro de la propia carpeta del asunto, y colocarlo sin
+   duplicarlo.
+
+   Acordado con Francisco el 17-sep-2026, fila 20 de docs/COLA.md
+   (docs/REGISTRO-SIN-DUPLICAR.md). Antes había que avisar primero
+   (pulsar Registrar) y buscar el papel sellado después, aunque ya
+   estuviera en la carpeta, y al final quedaban dos ficheros del mismo
+   papel. Aquí se le da la vuelta: se mira la carpeta, y si hay un PDF
+   con sello que no tiene el nombre que pone la aplicación, se
+   pregunta de qué documento es, se renombra ese PDF con el nombre que
+   le toca y el documento viejo se manda a la papelera.
+
+   Lo que ya mira cada PDF (`js/registro-lector.js`) no cambia: esto
+   solo decide CUÁNDO hace falta mirarlo y QUÉ hacer si trae sello.
+   ============================================================ */
+var RegistroSellado = (function () {
+
+  /* ---------- memoria de este ordenador ----------
+
+     No va en los ficheros compartidos: cada ordenador se acuerda por
+     su cuenta de qué PDF ya ha mirado, para no leerlos otra vez cada
+     vez que se abre el asunto. Se guarda el nombre y el tamaño de
+     cada uno (por si dos ficheros distintos comparten nombre en
+     asuntos distintos, o el mismo nombre cambia de contenido), y si
+     tenía sello o no. */
+
+  function claveAlmacen(asunto) { return 'sellos-mirados:' + asunto.nombre; }
+
+  async function leerMemoria(asunto) {
+    var m = await Almacen.leer(claveAlmacen(asunto));
+    return m || {};
+  }
+
+  function guardarMemoria(asunto, mapa) {
+    return Almacen.guardar(claveAlmacen(asunto), mapa);
+  }
+
+  function claveDe(nombre, tamano) { return nombre + '|' + tamano; }
+
+  /* ---------- qué hay que leer, y qué queda por resolver ----------
+
+     Sin efectos ni disco: reciben lo que ya se ha listado y deciden.
+     Así se pueden probar solas (pruebas/registro-sin-duplicar.mjs). */
+
+  function pendientesDeLeer(pdfs, memoria) {
+    return pdfs.filter(function (f) {
+      if (Documentos.pareceDeLaAplicacion(f.nombre)) return false;
+      return !memoria[claveDe(f.nombre, f.tamano)];
+    });
+  }
+
+  function pendientesDeResolver(pdfs, memoria) {
+    return pdfs.filter(function (f) {
+      var entrada = memoria[claveDe(f.nombre, f.tamano)];
+      return !!(entrada && entrada.sello && !entrada.ignorado);
+    });
+  }
+
+  /* Lee el sello de los que hagan falta y deja la memoria al día.
+     `leerSelloDe(f)` es quien de verdad abre el PDF: en la aplicación
+     es RegistroLector.leerSello; en las pruebas, una función simulada. */
+  async function actualizarMemoria(asunto, pdfs, leerSelloDe) {
+    var memoria = await leerMemoria(asunto);
+    var porLeer = pendientesDeLeer(pdfs, memoria);
+    if (!porLeer.length) return memoria;
+    for (var i = 0; i < porLeer.length; i++) {
+      var f = porLeer[i];
+      var sello = await leerSelloDe(f);
+      memoria[claveDe(f.nombre, f.tamano)] = { sello: sello || null, ignorado: false };
+    }
+    await guardarMemoria(asunto, memoria);
+    return memoria;
+  }
+
+  /* ---------- lo que usa la ficha del asunto ---------- */
+
+  /* Los PDF de la carpeta con sello, sin resolver todavía. Cada uno
+     lleva `nombre` y `sello` (lo que ha leído RegistroLector). */
+  async function detectar(asunto) {
+    if (!window.RegistroLector) return [];
+    var lista = await Carpetas.ficheros(asunto.handle);
+    var pdfs = [];
+    for (var i = 0; i < lista.length; i++) {
+      if (!/\.pdf$/i.test(lista[i].nombre)) continue;
+      var fichero = await lista[i].handle.getFile();
+      pdfs.push({ nombre: lista[i].nombre, handle: lista[i].handle, tamano: fichero.size });
+    }
+    var candidatos = pdfs.filter(function (f) {
+      if (window.IndiceExpediente && IndiceExpediente.es(f.nombre)) return false;   /* fila 137 */
+      return !Documentos.pareceDeLaAplicacion(f.nombre);
+    });
+    if (!candidatos.length) return [];
+
+    var memoria = await actualizarMemoria(asunto, candidatos, async function (f) {
+      try { return await RegistroLector.leerSello(await f.handle.getFile()); }
+      catch (e) { return null; }
+    });
+
+    return pendientesDeResolver(candidatos, memoria).map(function (f) {
+      return { nombre: f.nombre, sello: memoria[claveDe(f.nombre, f.tamano)].sello };
+    });
+  }
+
+  /* "No es un registro": deja de preguntar por este PDF, sin tocarlo. */
+  async function marcarIgnorado(asunto, nombrePdf) {
+    var lista = await Carpetas.ficheros(asunto.handle);
+    var f = lista.filter(function (x) { return x.nombre === nombrePdf; })[0];
+    if (!f) return;
+    var fichero = await f.handle.getFile();
+    var memoria = await leerMemoria(asunto);
+    var clave = claveDe(nombrePdf, fichero.size);
+    if (!memoria[clave]) return;
+    memoria[clave].ignorado = true;
+    await guardarMemoria(asunto, memoria);
+  }
+
+  /* ---------- el nombre nuevo, igual que el botón Registrar ----------
+
+     Mismo cálculo que js/registro.js: la fecha y el tipo se leen del
+     nombre del documento original, el código sale del sello, y el
+     nombre se monta con Nombres.montarDocumento. Sin efectos: se
+     puede probar sola. */
+  function nombreParaSello(nombreOriginal, sello, ficha) {
+    var previo = Documentos.leerNombre(nombreOriginal, ficha);
+    if (!previo.fecha || !previo.tipo) return '';
+    /* Fila 239: con número de documento, el sellado conserva el nombre
+       del original (el registro va a la ficha). */
+    if (previo.numero) return nombreOriginal;
+    var codigo = Nombres.codigoRegistro({
+      ano: sello.anio, sentido: sello.tipo, modo: sello.serie, numero: sello.numero
+    });
+    if (!codigo) return '';
+    return Nombres.montarDocumento({
+      fecha: previo.fecha, codigo: codigo, tipo: previo.tipo, curso: previo.curso,
+      extension: Nombres.extensionDe(nombreOriginal)
+    });
+  }
+
+  /* Fila 573: la fecha de registro, la del sello. */
+  function fechaDelSello(sello) {
+    var iso = window.FechaDeRegistro && sello ? FechaDeRegistro.isoDeSello(sello.fecha) : '';
+    return iso ? { fecha: iso, fuente: 'sello' } : {};
+  }
+
+  function hayColision(nombresExistentes, nombreNuevo) {
+    return nombresExistentes.indexOf(nombreNuevo) !== -1;
+  }
+
+  /* El nombre del original, con " SIN SELLAR" al final, antes de la
+     extensión (18-sep-2026, fila 58, docs/AJUSTES-DE-USO-2026-09-18.md,
+     4). Sin efectos: se puede probar sola. */
+  function nombreSinSellar(nombreOriginal) {
+    var ext = Nombres.extensionDe(nombreOriginal);
+    var base = ext ? nombreOriginal.slice(0, -(ext.length + 1)) : nombreOriginal;
+    return base + ' SIN SELLAR' + (ext ? '.' + ext : '');
+  }
+
+  /* El nombre pedido, o el primero libre con " (2)", " (3)"... si ya
+     está entre `nombresExistentes` (mismo criterio que
+     `Carpetas.nombreLibreConSufijo`, que solo mira el disco: aquí ya
+     se tiene la lista en memoria, así que no hace falta releerlo). */
+  function nombreLibreEntre(nombresExistentes, nombreDeseado) {
+    if (nombresExistentes.indexOf(nombreDeseado) === -1) return nombreDeseado;
+    var punto = nombreDeseado.lastIndexOf('.');
+    var base = punto === -1 ? nombreDeseado : nombreDeseado.slice(0, punto);
+    var ext = punto === -1 ? '' : nombreDeseado.slice(punto);
+    var n = 2;
+    while (nombresExistentes.indexOf(base + ' (' + n + ')' + ext) !== -1) n++;
+    return base + ' (' + n + ')' + ext;
+  }
+
+  /* Fila 566: ¿el PDF sellado y el documento original son el mismo fichero? (mismo nombre, sin mirar mayúsculas). */
+  function esElMismoFichero(nombrePdf, nombreDocumentoOriginal) {
+    return String(nombrePdf || '').toLowerCase() === String(nombreDocumentoOriginal || '').toLowerCase();
+  }
+
+  /* ---------- asociar el sello a un documento ----------
+
+     Renombra el PDF sellado con el nombre que le toca y apunta la
+     nota de registro, sustituyendo la anterior si la había (js/
+     notas.js, sustituir). El documento original **ya no va a la
+     papelera** (fila 58, 4): se queda en la misma carpeta, renombrado
+     con "SIN SELLAR" al final, por si hay que repetir el registro sin
+     volver a escanear. Si ese nombre ya existe, se numera "(2)", como
+     en el resto de la aplicación. No se crea ningún fichero nuevo de
+     verdad: solo se renombran los dos que ya había. */
+  /* Fila 566: si tras apartar el original el documento registrado no está en la carpeta, se devuelve lo apartado y se avisa en rojo. */
+  async function devolverSiFalta(asunto, nombreFinal, nombreConservado, aPrevias) {
+    var hay = false;
+    try { hay = await Carpetas.existeFichero(asunto.handle, nombreFinal); } catch (e) { hay = true; }
+    if (hay) return;
+    if (aPrevias && window.VersionesPrevias) {
+      try { await VersionesPrevias.sacar(asunto.handle, nombreConservado); } catch (e2) { /* ya se avisa abajo */ }
+    }
+    throw new Error('el documento registrado no ha quedado en la carpeta; he dejado el original donde estaba');
+  }
+
+  /* Fila 239: el original tiene número de documento. El original y el
+     sellado son el mismo documento (mismo número, mismo nombre): el
+     original pasa a «SIN SELLAR» en la subcarpeta de previas y el
+     sellado ocupa su sitio. El registro se apunta en la ficha. */
+  async function asociarNumerado(asunto, nombrePdf, nombreDocumentoOriginal, sello, previo, opciones) {
+    var codigo = Nombres.codigoRegistro({ ano: sello.anio, sentido: sello.tipo, modo: sello.serie, numero: sello.numero });
+    if (!codigo) {
+      U.aviso('No he podido leer el número de registro del sello.', 'malo');
+      return false;
+    }
+    try {
+      var yaEsta = await Carpetas.ficheros(asunto.handle);
+      var nombres = yaEsta.map(function (f) { return f.nombre; }).filter(function (n) { return n !== nombrePdf; });
+      var extSellado = Nombres.extensionDe(nombrePdf);
+      var extOriginal = Nombres.extensionDe(nombreDocumentoOriginal);
+      var base = extOriginal ? nombreDocumentoOriginal.slice(0, -(extOriginal.length + 1)) : nombreDocumentoOriginal;
+      var nombreFinal = base + (extSellado ? '.' + extSellado : '');
+      /* Fila 566: si el sellado y el original son el mismo fichero, no se aparta nada: solo se apunta el registro. */
+      var mismo = esElMismoFichero(nombrePdf, nombreDocumentoOriginal);
+      var nombreConservado = nombreLibreEntre(nombres, nombreSinSellar(nombreDocumentoOriginal));
+      var aPrevias = false;
+      if (!mismo) {
+        await Carpetas.renombrarFichero(asunto.handle, nombreDocumentoOriginal, nombreConservado);
+        if (window.VersionesPrevias) {
+          try { await VersionesPrevias.mover(asunto.handle, nombreConservado); aPrevias = true; } catch (e3) { aPrevias = false; }
+        }
+        if (nombreFinal !== nombrePdf) await Carpetas.renombrarFichero(asunto.handle, nombrePdf, nombreFinal);
+        if (window.VersionesPrevias) await VersionesPrevias.ordenarTrasCambio(asunto.handle);
+        await devolverSiFalta(asunto, nombreFinal, nombreConservado, aPrevias);
+        if (aPrevias && window.TareasConDocumento) await TareasConDocumento.versionConservada(asunto, nombreDocumentoOriginal, nombreConservado, nombreFinal);   /* fila 522 */
+      }
+      await DocumentosDatos.anotar(asunto.nombre, previo.numero, {
+        tipo: previo.tipo, fecha: previo.fecha,
+        anadirRegistro: Object.assign({ ano: sello.anio, sentido: sello.tipo, modo: sello.serie, numero: sello.numero, codigo: codigo }, fechaDelSello(sello))   /* fila 573 */
+      });
+      if (window.FechaDeRegistro) await FechaDeRegistro.repasar();
+      var fechaSello = sello.fecha ? ' el ' + sello.fecha : '';
+      await window.Notas.sustituir(asunto,
+        'Registrado ' + codigo + fechaSello + ' · ' + nombreDocumentoOriginal + (mismo ? '.' : '. Se conserva el original sin sellar.'),
+        'registroDeDocumento', nombreDocumentoOriginal);
+      if (mismo) {
+        U.aviso('Documento registrado' + avisoCodigo(opciones, codigo) + '.', 'bueno');
+        return nombreFinal;
+      }
+      var carpetaPrevias = window.VersionesPrevias && VersionesPrevias.nombreDeCarpeta
+        ? await VersionesPrevias.nombreDeCarpeta(asunto.handle) : '_Previas';
+      U.aviso(aPrevias ? 'Documento registrado' + avisoCodigo(opciones, codigo) + '. El original sin sellar se conserva en «' + carpetaPrevias + '».'
+        : 'Documento registrado' + avisoCodigo(opciones, codigo) + '. El original sin sellar se conserva en la carpeta.', 'bueno');
+      return nombreFinal;   /* fila 285: el nombre con el que queda el sellado */
+    } catch (e) {
+      U.aviso('No he podido colocarlo: ' + U.mensajeDeError(e), 'malo');
+      return false;
+    }
+  }
+
+  /* Fila 478: quien registra por la «Ruta» del documento (js/ruta-copia.js) quiere el código en el aviso. */
+  function avisoCodigo(opciones, codigo) { return opciones && opciones.conCodigo && codigo ? ' (' + codigo + ')' : ''; }
+
+  /* Fila 434 (docs/ARREGLOS-DEL-HITO-EN-TRABAJO.md, punto 5): al unir el PDF sellado a un documento
+     que es de un hito, se marca sola la primera tarea de registrar que ese hito tenga pendiente.
+     `opciones.noMarcar` lo usa quien marca la tarea por su cuenta (el registro por personas). */
+  async function asociar(asunto, nombrePdf, nombreDocumentoOriginal, sello, opciones) {
+    var nuevo = await asociarSinMarcar(asunto, nombrePdf, nombreDocumentoOriginal, sello, opciones);
+    if (nuevo && !(opciones && opciones.noMarcar)) await marcarRegistrarDelHito(asunto, nombreDocumentoOriginal, nuevo);
+    return nuevo;
+  }
+
+  async function marcarRegistrarDelHito(asunto, original, nuevo) {
+    if (!window.Hitos || !Hitos.marcarGuionPorAccion || !Hitos.hitosDe) return;
+    try {
+      var hitos = await Hitos.hitosDe(asunto.nombre);
+      var h = (hitos || []).filter(function (x) {
+        return (x.documentos || []).some(function (n) { return n === original || n === nuevo; });
+      })[0];
+      if (h) await Hitos.marcarGuionPorAccion(asunto, h.id, 'registrar', nuevo);   /* fila 522: la tarea de ese documento */
+    } catch (e) { /* no crítico: el documento ya está registrado */ }
+  }
+
+  async function asociarSinMarcar(asunto, nombrePdf, nombreDocumentoOriginal, sello, opciones) {
+    var previoNumerado = Documentos.leerNombre(nombreDocumentoOriginal, asunto && asunto.ficha);
+    if (previoNumerado.numero && previoNumerado.fecha && previoNumerado.tipo) {
+      return asociarNumerado(asunto, nombrePdf, nombreDocumentoOriginal, sello, previoNumerado, opciones);
+    }
+    var nombreNuevo = nombreParaSello(nombreDocumentoOriginal, sello);
+    if (!nombreNuevo) {
+      U.aviso('Ese documento no tiene fecha ni tipo reconocibles en su nombre: no sé qué ' +
+              'ponerle a la copia registrada.', 'malo');
+      return false;
+    }
+
+    try {
+      var yaEsta = await Carpetas.ficheros(asunto.handle);
+      var nombres = yaEsta.map(function (f) { return f.nombre; })
+        .filter(function (n) { return n !== nombrePdf; });
+      if (hayColision(nombres, nombreNuevo)) {
+        U.aviso('Ya hay un documento con ese nombre en la carpeta: no se ha tocado nada.', 'malo');
+        return false;
+      }
+
+      await Carpetas.renombrarFichero(asunto.handle, nombrePdf, nombreNuevo);
+
+      /* Fila 566: si el sellado era el propio original, ya está renombrado: no hay original que apartar. */
+      if (esElMismoFichero(nombrePdf, nombreDocumentoOriginal)) {
+        var codigoMismo = (nombreNuevo.match(/^\d{6}\s+(\S+)/) || [])[1] || '';
+        await window.Notas.sustituir(asunto,
+          'Registrado ' + codigoMismo + (sello.fecha ? ' el ' + sello.fecha : '') + ' · ' + nombreDocumentoOriginal + '.',
+          'registroDeDocumento', nombreDocumentoOriginal, { auto: true });
+        U.aviso('Documento registrado' + avisoCodigo(opciones, codigoMismo) + '.', 'bueno');
+        return nombreNuevo;
+      }
+      var nombreConservado = nombreLibreEntre(nombres.concat([nombreNuevo]), nombreSinSellar(nombreDocumentoOriginal));
+      await Carpetas.renombrarFichero(asunto.handle, nombreDocumentoOriginal, nombreConservado);
+      /* Fila 160 (docs/VERSIONES-PREVIAS.md): el «SIN SELLAR», a «Versiones
+         previas» (y el Word que ya tenga su PDF); si falla, se queda aquí. */
+      var aPrevias = false;
+      if (window.VersionesPrevias) {
+        try { await VersionesPrevias.mover(asunto.handle, nombreConservado); aPrevias = true; } catch (e3) { aPrevias = false; }
+        await VersionesPrevias.ordenarTrasCambio(asunto.handle);
+      }
+      if (aPrevias && window.TareasConDocumento) await TareasConDocumento.versionConservada(asunto, nombreDocumentoOriginal, nombreConservado, nombreNuevo);   /* fila 522 */
+
+      var codigo = (nombreNuevo.match(/^\d{6}\s+(\S+)/) || [])[1] || '';
+      var fechaSello = sello.fecha ? ' el ' + sello.fecha : '';
+      await window.Notas.sustituir(asunto,
+        'Registrado ' + codigo + fechaSello + ' · ' + nombreDocumentoOriginal +
+        '. Se conserva el original sin sellar.',
+        'registroDeDocumento', nombreDocumentoOriginal, { auto: true });
+
+      var carpetaPrevias2 = aPrevias && opciones && opciones.conCodigo && window.VersionesPrevias && VersionesPrevias.nombreDeCarpeta
+        ? await VersionesPrevias.nombreDeCarpeta(asunto.handle) : 'Versiones previas';
+      U.aviso(aPrevias ? 'Documento registrado' + avisoCodigo(opciones, codigo) + '. El original sin sellar se conserva en «' + carpetaPrevias2 + '».'
+        : 'Documento registrado' + avisoCodigo(opciones, codigo) + '. El original sin sellar se conserva en la carpeta.', 'bueno');
+      return nombreNuevo;   /* fila 285 */
+    } catch (e) {
+      U.aviso('No he podido colocarlo: ' + U.mensajeDeError(e), 'malo');
+      return false;
+    }
+  }
+
+  return {
+    detectar: detectar,
+    marcarIgnorado: marcarIgnorado,
+    asociar: asociar,
+    nombreParaSello: nombreParaSello,
+    nombreSinSellar: nombreSinSellar,
+    nombreLibreEntre: nombreLibreEntre,
+    hayColision: hayColision,
+    esElMismoFichero: esElMismoFichero,
+    pendientesDeLeer: pendientesDeLeer,
+    pendientesDeResolver: pendientesDeResolver
+  };
+})();

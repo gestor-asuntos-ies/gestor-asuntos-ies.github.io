@@ -1,0 +1,453 @@
+/* ============================================================
+   comprobacion-entrada.js — las cosas que se configuran una vez en
+   cada ordenador, revisadas al entrar (29-sep-2026, fila 204,
+   docs/COMPROBACION-AL-ENTRAR.md).
+
+   Cada comprobación es una función pequeña que devuelve
+     { id, titulo, estado, frase, arreglar, ambar }
+   con estado 'bien' | 'falta' | 'sin-comprobar' | 'omitida'
+   (`ambar`: una «falta» que se pinta ámbar y no roja). Para añadir
+   otra, se añade una función a LISTA: el panel no cambia.
+
+   SOLO LEE. No escribe nada en _GESTOR ni en Drive, y el envío de
+   correo no se prueba enviando ninguno.
+
+   El panel y la marca de la cabecera viven en
+   js/comprobacion-entrada-ver.js. Lo omitido en este ordenador se
+   guarda en localStorage (`gestor-comprobacion-omitidas`).
+   ============================================================ */
+(function () {
+  'use strict';
+
+  var CLAVE_OMITIDAS = 'gestor-comprobacion-omitidas';
+  var TIEMPO_MAX_MS = 8000;
+
+  /* ---------- lo omitido en este ordenador ---------- */
+
+  function leerOmitidas() {
+    try {
+      var v = JSON.parse(window.localStorage.getItem(CLAVE_OMITIDAS));
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+
+  function guardarOmitidas(lista) {
+    try { window.localStorage.setItem(CLAVE_OMITIDAS, JSON.stringify(lista)); } catch (e) { /* sin memoria: nada */ }
+  }
+
+  function omitir(id) {
+    var l = leerOmitidas();
+    if (l.indexOf(id) === -1) l.push(id);
+    guardarOmitidas(l);
+  }
+
+  function volverARevisar(id) {
+    guardarOmitidas(leerOmitidas().filter(function (x) { return x !== id; }));
+  }
+
+  /* ---------- ayudas ---------- */
+
+  function enDemo() { return !!(window.Demo && Demo.activo && Demo.activo()); }
+
+  function conTiempo(promesa) {
+    return new Promise(function (resolver, rechazar) {
+      var t = setTimeout(function () { rechazar(new Error('tarda demasiado en contestar')); }, TIEMPO_MAX_MS);
+      Promise.resolve(promesa).then(function (v) { clearTimeout(t); resolver(v); },
+        function (e) { clearTimeout(t); rechazar(e); });
+    });
+  }
+
+  function gestor() { return window.Gestor && Gestor.carpetaGestor ? Gestor.carpetaGestor() : null; }
+
+  /* Lleva a donde se arregla: cierra el cuadro que haya, va a Ajustes,
+     abre la pestaña y el bloque donde está `selector` y lo deja a la
+     vista. Los bloques de Ajustes se pintan sueltos, así que se espera
+     un poco a que el elemento exista. */
+  function llevarA(selector) {
+    return function () {
+      var cerrar = document.getElementById('cuadro-cancelar');
+      if (cerrar && !document.getElementById('capa').classList.contains('oculto')) cerrar.click();
+      App.ir('ajustes');
+      var intentos = 30;
+      (function buscar() {
+        var el = document.querySelector(selector);
+        if (!el) {
+          if (--intentos > 0) setTimeout(buscar, 100);
+          return;
+        }
+        /* Fila 288: el salto común mira en qué pestaña (o en Herramientas) está la sección. */
+        if (App.irASeccionDeAjustes) { App.irASeccionDeAjustes(el); return; }
+        var tab = el.closest('.ajustes-tab');
+        if (tab && App.cambiarPestanaAjustes) App.cambiarPestanaAjustes(tab.id.replace('ajustes-tab-', ''));
+        /* Algunos bloques (Hitos) se pliegan solos al terminar de cargar
+           (js/ajustes-plegado.js recoloca lo que recordaba): se vuelve a
+           abrir un par de veces más, hasta que asienten. */
+        function abrir() {
+          var d = el.closest('details');
+          while (d) { if (!d.open) d.open = true; d = d.parentElement && d.parentElement.closest('details'); }
+        }
+        abrir();
+        setTimeout(abrir, 400);
+        setTimeout(abrir, 1500);
+        setTimeout(function () { if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60);
+      })();
+    };
+  }
+
+  function resultado(id, titulo, estado, frase, arreglar, ambar) {
+    return { id: id, titulo: titulo, estado: estado, frase: frase, arreglar: arreglar || null, ambar: !!ambar };
+  }
+
+  /* Fila 318: carpeta recordada a la que el navegador ya no da permiso. Se arregla pidiéndolo
+     (PermisosCarpetas.pedir), nunca señalándola otra vez. */
+  var PERMISO_OTRA_VEZ = ' Pulsa «Dar permiso»: no hay que volver a señalarla. Si el navegador ofrece «Permitir en cada visita», elígelo y no volverá a pedirlo.';
+  function pedirPermiso(id, titulo, frase, arreglar, ambar) {
+    var r = resultado(id, titulo, 'falta', 'El navegador pide otra vez el permiso de ' + frase + '.' + PERMISO_OTRA_VEZ, arreglar, ambar);
+    r.boton = 'Dar permiso';
+    r.carpeta = frase;
+    r.darPermiso = function () { return PermisosCarpetas.pedir(id); };
+    return r;
+  }
+
+  function sinComprobar(id, titulo, e) {
+    return resultado(id, titulo, 'sin-comprobar',
+      'No he podido comprobarlo: ' + ((e && e.message) ? e.message : 'no ha contestado') + '.');
+  }
+
+  /* El curso en marcha: de septiembre a agosto. */
+  function limitesDelCurso() {
+    var h = new Date();
+    var ano = h.getMonth() >= 8 ? h.getFullYear() : h.getFullYear() - 1;
+    return { desde: ano + '-09-01', hasta: (ano + 1) + '-08-31' };
+  }
+
+  /* ---------- las comprobaciones ---------- */
+
+  async function carpetas() {
+    var T = 'Carpetas de la app';
+    var arreglar = llevarA('#estado-carpetas');
+    var faltan = [];
+    if (!App.E.abiertos) faltan.push('la de asuntos abiertos');
+    if (!App.E.archivo) faltan.push('la del ARCHIVO');
+    if (faltan.length) {
+      return resultado('carpetas', T, 'falta', 'Falta señalar ' + faltan.join(' y ') +
+        '. Sin ellas la aplicación no sabe dónde guardar los asuntos.', arreglar);
+    }
+    if (enDemo()) return resultado('carpetas', T, 'bien', 'Señaladas.');
+    var sinPermiso = [];
+    if (!(await Carpetas.permiso(App.E.abiertos, false))) sinPermiso.push('asuntos abiertos');
+    if (!(await Carpetas.permiso(App.E.archivo, false))) sinPermiso.push('ARCHIVO');
+    if (sinPermiso.length) {
+      return resultado('carpetas', T, 'falta', 'El navegador ha dejado de dar permiso a la carpeta de ' +
+        sinPermiso.join(' y ') + '. Hay que volver a señalarla.', arreglar);
+    }
+    if (!gestor()) {
+      return resultado('carpetas', T, 'falta', 'No encuentro dentro de las carpetas la zona donde la aplicación ' +
+        'guarda sus ficheros. Hay que volver a señalarlas.', arreglar);
+    }
+    return resultado('carpetas', T, 'bien', 'Señaladas y con permiso.');
+  }
+
+  async function alumnado() {
+    var T = 'Base de datos de alumnado';
+    var arreglar = llevarA('#alumnado-bd-carpeta');
+    if (!window.AlumnadoBD) return resultado('alumnado', T, 'omitida', '');
+    var dir = await AlumnadoBD.carpeta();
+    var copia = await AlumnadoBD.leer();
+    if (dir) {
+      var op = { mode: 'read' };
+      var permiso = false;
+      try { permiso = (await dir.queryPermission(op)) === 'granted'; } catch (e) { permiso = false; }
+      if (!permiso) {
+        if (copia) {
+          var r = pedirPermiso('alumnado', T, 'la carpeta de la base de datos de alumnado', arreglar, true);
+          r.frase = r.frase.replace('alumnado.', 'alumnado; mientras tanto se usa la última copia.');
+          return r;
+        }
+        return pedirPermiso('alumnado', T, 'la carpeta de la base de datos de alumnado', arreglar);
+      }
+      try { await dir.getFileHandle(AlumnadoBD.FICHERO); }
+      catch (e) {
+        return resultado('alumnado', T, 'falta', 'La carpeta señalada ya no tiene el fichero de la base de datos ' +
+          'de alumnado. Hay que señalar la carpeta buena.', arreglar);
+      }
+      return resultado('alumnado', T, 'bien', 'Carpeta señalada y con el fichero dentro.');
+    }
+    if (!copia) {
+      return resultado('alumnado', T, 'falta', 'No hay carpeta señalada ni copia de la base de datos de alumnado: ' +
+        'el alumnado sale solo del listado de matrícula, con menos datos.', arreglar);
+    }
+    /* Sin carpeta pero con copia (el caso del compañero): bien, salvo copia más vieja que el RegAlum. */
+    var deLaCopia = new Date(copia.generado);
+    var reg = window.DatosQueTengo ? await DatosQueTengo.fechaReal('RegAlum.csv') : 0;
+    if (reg && !isNaN(deLaCopia.getTime()) && deLaCopia.getTime() < reg) {
+      var fechas = ' es del ' + DatosQueTengo.fechaHora(deLaCopia) + ' y el listado de matrícula, del ' +
+        DatosQueTengo.fechaHora(reg) + ': la copia es más vieja. ';
+      var frase = AlumnadoBD.hechoPor(copia) ?
+        'La copia del alumnado que hace el Centro de datos' + fechas + 'Hay que subir ese listado al Centro de datos: él hace la copia nueva.' :
+        'La copia de la base de datos de alumnado' + fechas + 'Hay que pulsar «Actualizar los datos» en la base de datos de alumnado y entrar en el gestor desde el ordenador que la trae.';
+      return resultado('alumnado', T, 'falta', frase, arreglar, true);
+    }
+    return resultado('alumnado', T, 'bien', 'Se usa la copia que hay guardada.');
+  }
+
+  /* Fila 312: la carpeta del Centro de datos, de la que el gestor coge los listados de Séneca. */
+  async function centroDeDatos() {
+    var T = 'Carpeta del Centro de datos';
+    var arreglar = llevarA('#bloque-centro-de-datos');
+    if (!window.CentroDeDatos) return resultado('centro-de-datos', T, 'omitida', '');
+    var dir = await CentroDeDatos.carpeta();
+    var apuntes = await CentroDeDatos.leerApuntes(true);
+    var ultimo = null;
+    CentroDeDatos.CLAVES.forEach(function (c) {
+      var a = CentroDeDatos.apunteDe(apuntes, c);
+      if (a && (!ultimo || new Date(a.subido) > new Date(ultimo))) ultimo = a.subido;
+    });
+    if (dir) {
+      if (!(await CentroDeDatos.permiso(dir, false))) {
+        return pedirPermiso('centro-de-datos', T, 'la carpeta del Centro de datos', arreglar, true);
+      }
+      var r = await CentroDeDatos.leerIndice(dir);
+      if (!r.ok) {
+        return resultado('centro-de-datos', T, 'falta', 'La carpeta señalada no es la del Centro de datos. Hay que señalar la buena.', arreglar);
+      }
+      if ((r.indice.contrato || 1) > CentroDeDatos.CONTRATO) {
+        return resultado('centro-de-datos', T, 'falta', 'El Centro de datos es más nuevo que esta aplicación.', arreglar, true);
+      }
+      /* Fila 328: el índice recibe las empresas y falta el permiso de escribir: ámbar, y «Arreglarlo» lo pide. */
+      var sinEscribir = (window.CentroDeDatosEntregar && !(window.SoloConsulta && SoloConsulta.activo())) ? await CentroDeDatosEntregar.listasSinPermisoDeEscribir() : [];
+      if (sinEscribir.length) {   /* fila 329: nombra las listas que se reciben y no se pueden entregar */
+        var f = resultado('centro-de-datos', T, 'falta', 'Falta el permiso para escribir: ' + (sinEscribir.length > 1 ? sinEscribir.slice(0, -1).join(', ') + ' y ' + sinEscribir[sinEscribir.length - 1] : sinEscribir[0]) + ' no se entregan al Centro de datos.', arreglar, true);
+        f.boton = 'Arreglarlo';
+        f.darPermiso = async function () { return (await CentroDeDatos.pedirPermisos(dir)) && (await CentroDeDatos.permisoEscribir(dir, false)); };
+        return f;
+      }
+      return resultado('centro-de-datos', T, 'bien', 'Índice del ' + (CentroDeDatos.fechaCorta(r.indice.actualizado, true) || 'sin fecha') + '.');
+    }
+    if (ultimo) {
+      return resultado('centro-de-datos', T, 'bien', 'Este ordenador usa lo que trae el otro. Último: ' + CentroDeDatos.fechaCorta(ultimo, true) + '.');
+    }
+    return resultado('centro-de-datos', T, 'falta', 'No hay carpeta del Centro de datos señalada ni nada traído de ella: ' +
+      'los listados de Séneca se suben a mano.', arreglar);
+  }
+
+  async function bandeja() {
+    var T = 'Bandeja de Gmail';
+    var arreglar = llevarA('#estado-bandeja');
+    var h = await Almacen.leer('bandeja');
+    if (!h) {
+      return resultado('bandeja', T, 'falta', 'No hay carpeta de la bandeja señalada: los correos etiquetados en ' +
+        'Gmail no llegan a la aplicación.', arreglar);
+    }
+    /* Fila 318: con `sinpermiso=` la copia de pruebas sí mira el permiso. */
+    if (enDemo() && !(Demo.permisosSimulados && Demo.permisosSimulados())) return resultado('bandeja', T, 'bien', 'Señalada.');
+    if (!(await Carpetas.permiso(h, false))) {
+      return pedirPermiso('bandeja', T, 'la carpeta de la bandeja', arreglar);
+    }
+    try { await (h.values ? h.values() : h.entries())[Symbol.asyncIterator]().next(); }   /* fila 318: el disco de la copia de pruebas solo trae entries() */
+    catch (e) {
+      return resultado('bandeja', T, 'falta', 'No puedo leer la carpeta de la bandeja (¿se ha movido o borrado?). ' +
+        'Hay que volver a señalarla.', arreglar);
+    }
+    return resultado('bandeja', T, 'bien', 'Señalada y se lee.');
+  }
+
+  /* Fila 455: la carpeta de entrada de documentos sueltos (js/entrada.js). Sin señalar es lo de siempre
+     (la raíz de asuntos vivos); señalada y sin encontrar no es un error: «Por clasificar» lo dice. */
+  async function entrada() {
+    var T = 'Carpeta de entrada de documentos sueltos';
+    var arreglar = llevarA('#entrada-ajustes');
+    var h = window.Entrada ? Entrada.carpetaSenalada() : null;
+    /* Fila 687: con las carpetas en Drive y sin señalar, «Por clasificar» no ve nada: falta, no está bien. */
+    if (!h && window.EntradaAviso && EntradaAviso.falta()) return resultado('entrada', T, 'falta', EntradaAviso.FRASE, arreglar);
+    if (!h) return resultado('entrada', T, 'bien', 'Sin señalar: se usa la de asuntos vivos.');
+    if (enDemo() && !(Demo.permisosSimulados && Demo.permisosSimulados())) return resultado('entrada', T, 'bien', 'Señalada.');
+    if (!(await Carpetas.permiso(h, false))) {
+      return pedirPermiso('entrada', T, 'la carpeta de entrada de documentos sueltos', arreglar);
+    }
+    return resultado('entrada', T, 'bien', Entrada.noSeVe() ? Entrada.FRASE_NO_ESTA : 'Señalada.');
+  }
+
+  async function envio() {
+    var T = 'Envío de correo';
+    var arreglar = llevarA('#envio-correo-url');
+    if (!window.CorreoEnviar) return resultado('envio', T, 'omitida', '');
+    if (enDemo()) return resultado('envio', T, 'bien', 'Preparado (en la copia de pruebas no sale nada de verdad).');
+    var url = CorreoEnviar.leerUrl();
+    if (!url) {
+      return resultado('envio', T, 'falta', 'No está la dirección del script de Gmail: sin ella el botón «Enviar» ' +
+        'no manda nada.', arreglar);
+    }
+    var problema = CorreoEnviar.problemaDeDireccion(url);
+    if (problema) return resultado('envio', T, 'falta', problema, arreglar);
+    if (CorreoEnviar.scriptDesactualizado()) {
+      return resultado('envio', T, 'falta', 'El script de Gmail es más antiguo que la aplicación. Hay que pegar el ' +
+        'script nuevo y pulsar «Nueva versión».', arreglar, true);
+    }
+    return resultado('envio', T, 'bien', 'La dirección del script está guardada. (Para no enviar ningún correo, ' +
+      'no se ha probado; se prueba con «Probar» en Ajustes.)');
+  }
+
+  async function ruta() {
+    var T = 'Ruta de la nube en este ordenador';
+    var arreglar = llevarA('#ruta-dropbox-lugar');
+    var R = window.RutaCarpetas;
+    if (!R) return resultado('ruta', T, 'omitida', '');
+    var db = R.dropboxDeEsteOrdenador();
+    if (db.deducido) return resultado('ruta', T, 'bien', 'Sale sola de la dirección de esta copia.');
+    await R.cargarComun();
+    var faltan = [];
+    if (!db.valor) faltan.push('dónde está la nube en este ordenador');
+    ['abiertos', 'archivo'].forEach(function (c) {
+      if (!R.comunConocido(c) && !R.leer(c)) faltan.push('la ruta de la carpeta ' + (c === 'archivo' ? 'ARCHIVO' : 'de asuntos abiertos'));
+    });
+    if (faltan.length) {
+      return resultado('ruta', T, 'falta', 'Falta apuntar ' + faltan.join(' y ') + ': sin ello el botón «Ruta» ' +
+        'no puede copiar la dirección de la carpeta de un asunto.', arreglar);
+    }
+    return resultado('ruta', T, 'bien', 'Apuntada.');
+  }
+
+  async function datosDelCentro() {
+    var T = 'Datos del centro';
+    var arreglar = llevarA('#plantillas-centro');
+    if (!window.Plantillas) return resultado('centro-datos', T, 'omitida', '');
+    var p = await Plantillas.cargar(gestor());
+    var falta = [];
+    [['centro', 'el nombre'], ['codigo', 'el código'], ['localidad', 'la localidad'],
+      ['direccion', 'la dirección'], ['provincia', 'la provincia']].forEach(function (c) {
+      if (!String(p[c[0]] || '').trim()) falta.push(c[1]);
+    });
+    if (falta.length) {
+      return resultado('centro-datos', T, 'falta', 'Faltan datos del centro (' + falta.join(', ') +
+        '): salen en blanco en los documentos y en los impresos.', arreglar);
+    }
+    return resultado('centro-datos', T, 'bien', 'Completos.');
+  }
+
+  async function cargos() {
+    var T = 'Cargos: Dirección y Secretaría';
+    var arreglar = llevarA('#cargos-lista');
+    if (!window.Cargos) return resultado('centro-cargos', T, 'omitida', '');
+    var falta = [];
+    var d = await Cargos.vigente('direccion');
+    var s = await Cargos.vigente('secretaria');
+    if (!d) falta.push('la Dirección');
+    if (!s) falta.push('la Secretaría');
+    if (falta.length) {
+      return resultado('centro-cargos', T, 'falta', 'Hoy no hay nadie apuntado en ' + falta.join(' ni en ') +
+        ': las firmas de los documentos saldrán vacías.', arreglar);
+    }
+    return resultado('centro-cargos', T, 'bien', 'Hay quien los ocupa hoy.');
+  }
+
+  async function festivos() {
+    var T = 'Festivos del curso';
+    var arreglar = llevarA('#hitos-festivos');
+    if (!window.Hitos) return resultado('centro-festivos', T, 'omitida', '');
+    var datos = await Hitos.leer();
+    var lista = (datos && datos.ajustes && datos.ajustes.festivos) || [];
+    var c = limitesDelCurso();
+    var hay = lista.some(function (f) { return f >= c.desde && f <= c.hasta; });
+    if (!hay) {
+      return resultado('centro-festivos', T, 'falta', 'No hay ningún festivo apuntado de este curso: los plazos de ' +
+        'los asuntos se contarán como si todos los días fueran hábiles.', arreglar);
+    }
+    return resultado('centro-festivos', T, 'bien', 'Apuntados.');
+  }
+
+  /* Fila 239 (docs/NOMBRES-FIJOS-CON-NUMERO.md, apartados 5 y 6). */
+  async function tiposLargos() {
+    var T = 'Nombres cortos de los tipos';
+    if (!window.TiposLargos) return resultado('tipos-largos', T, 'omitida', '');
+    var largos = TiposLargos.lista();
+    if (!largos.length) return resultado('tipos-largos', T, 'bien', 'Ningún tipo pasa de ' + TiposLargos.TOPE + ' caracteres.');
+    return resultado('tipos-largos', T, 'falta', largos.length + (largos.length === 1 ? ' tipo pasa' : ' tipos pasan') +
+      ' de ' + TiposLargos.TOPE + ' caracteres en el nombre que entra en las carpetas y los documentos. Se siguen usando ' +
+      'con su nombre entero, pero conviene ponerles un nombre corto.', function () {
+      var cerrar = document.getElementById('cuadro-cancelar');
+      if (cerrar && !document.getElementById('capa').classList.contains('oculto')) cerrar.click();
+      TiposLargos.abrir();
+    }, true);
+  }
+
+  async function largoDeRutas() {
+    var T = 'Largo de las rutas';
+    if (!window.Nombres || !Nombres.medidor) return resultado('largo-rutas', T, 'omitida', '');
+    var m = await Nombres.medidor();
+    if (!m.conocido) return resultado('largo-rutas', T, 'bien', 'Todavía no se puede calcular: hay que apuntar antes la ruta de la carpeta ARCHIVO.');
+    if (m.margen < 0) {
+      return resultado('largo-rutas', T, 'falta', 'El caso más largo no cabe en la ruta de la nube: se pasa ' + (-m.margen) +
+        ' caracteres. Lo que más ocupa es ' + m.masOcupa.texto + '.', llevarA('#largo-rutas-margen'));
+    }
+    return resultado('largo-rutas', T, 'bien', 'Quedan ' + m.margen + ' caracteres de margen.');
+  }
+
+  async function copiaSinInternet() {
+    var T = 'Copia sin internet al día';
+    if (window.location.protocol !== 'file:') return null;   /* en la web, esta fila no sale */
+    var base = window.__COPIA_BASE_REMOTO__ || 'https://raw.githubusercontent.com/fmargon780/gestor-asuntos-copia/main/';
+    var resp;
+    try { resp = await fetch(base + 'version.json?t=' + Date.now(), { cache: 'no-store' }); }
+    catch (e) { return resultado('copia', T, 'sin-comprobar', 'No he podido comprobarlo: no hay conexión a internet.'); }
+    if (!resp.ok) return resultado('copia', T, 'sin-comprobar', 'No he podido comprobarlo: la página de versiones no contesta.');
+    var remoto = await resp.json();
+    if (!remoto || !remoto.version) return resultado('copia', T, 'sin-comprobar', 'No he podido comprobarlo: la respuesta no se entiende.');
+    if (remoto.version === App.VERSION) return resultado('copia', T, 'bien', 'Es la última versión.');
+    var arreglar = function () {
+      /* Fila 325: ya no hay franja; el botón hace lo mismo que pulsar la marca (abre su pregunta). */
+      var cerrar = document.getElementById('cuadro-cancelar');
+      if (cerrar && !document.getElementById('capa').classList.contains('oculto')) cerrar.click();
+      var m = document.getElementById('marca-version');
+      if (m) { m.click(); return; }
+      var b = document.getElementById('franja-copia-actualizar');
+      if (b && b.scrollIntoView) { b.scrollIntoView({ block: 'center' }); if (b.focus) b.focus(); }
+    };
+    var r = resultado('copia', T, 'falta', 'Hay una versión nueva del Gestor (' + remoto.version + ') y esta copia tiene la ' +
+      App.VERSION + '. Se pone al día sola al pulsar «Entrar»; si la quieres ya, pulsa «Actualizar ahora».', arreglar, true);
+    r.boton = 'Actualizar ahora';
+    return r;
+  }
+
+  var LISTA = [
+    ['carpetas', 'Carpetas de la app', carpetas],
+    ['alumnado', 'Base de datos de alumnado', alumnado],
+    ['centro-de-datos', 'Carpeta del Centro de datos', centroDeDatos],
+    ['bandeja', 'Bandeja de Gmail', bandeja],
+    ['entrada', 'Carpeta de entrada de documentos sueltos', entrada],
+    ['envio', 'Envío de correo', envio],
+    ['ruta', 'Ruta de la nube en este ordenador', ruta],
+    ['centro-datos', 'Datos del centro', datosDelCentro],
+    ['centro-cargos', 'Cargos: Dirección y Secretaría', cargos],
+    ['centro-festivos', 'Festivos del curso', festivos],
+    ['tipos-largos', 'Nombres cortos de los tipos', tiposLargos],
+    ['largo-rutas', 'Largo de las rutas', largoDeRutas],
+    ['copia', 'Copia sin internet al día', copiaSinInternet]
+  ];
+
+  /* Revisa todo, cada cosa por separado y con su tiempo máximo: lo que
+     falle o tarde se queda en «sin comprobar» sin estorbar al resto.
+     Las omitidas en este ordenador no se revisan. */
+  async function revisar() {
+    var omitidas = leerOmitidas();
+    var filas = await Promise.all(LISTA.map(async function (c) {
+      if (omitidas.indexOf(c[0]) !== -1) {
+        return resultado(c[0], c[1], 'omitida', 'No se usa en este ordenador.');
+      }
+      try {
+        var r = await conTiempo(c[2]());
+        return r === null ? null : r;
+      } catch (e) { return sinComprobar(c[0], c[1], e); }
+    }));
+    return filas.filter(function (f) { return f && !(f.estado === 'omitida' && !f.frase); });
+  }
+
+  /* Las que cuentan como «falta algo»: falta, o no se ha podido comprobar. */
+  function cuentanComoFalta(f) { return f.estado === 'falta' || f.estado === 'sin-comprobar'; }
+
+  window.ComprobacionEntrada = {
+    revisar: revisar, cuentanComoFalta: cuentanComoFalta,
+    omitir: omitir, volverARevisar: volverARevisar, leerOmitidas: leerOmitidas,
+    CLAVE_OMITIDAS: CLAVE_OMITIDAS, _limitesDelCurso: limitesDelCurso
+  };
+})();

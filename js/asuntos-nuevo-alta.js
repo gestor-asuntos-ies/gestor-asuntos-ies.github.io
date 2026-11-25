@@ -1,0 +1,410 @@
+/* ============================================================
+   asuntos-nuevo-alta.js — Nuevo asunto: el alta de un tercero que no está en la lista, y el buscador de terceros reutilizable.
+
+   Sacado tal cual de js/asuntos-nuevo.js en la fila 133
+   (docs/PARTIR-FICHEROS-GRANDES.md), sin cambiar nada de lo que hace.
+   Se carga justo detrás de él.
+   ============================================================ */
+
+/* ---------- alta de un tercero que no está en la lista ---------- */
+
+/* La aclaración de cada categoría, encima de los campos. */
+App.ACLARA_ALTA = {
+  ALUMNADO: 'Para quien ha pedido plaza y todavía no está matriculado. Si ya ' +
+            'tiene Nº de identificación escolar, ponlo: así su carpeta se ' +
+            'llamará igual el día que se matricule.',
+  EMPRESAS: 'La razón social es el nombre fiscal, el que viene en las facturas. ' +
+            'El nombre comercial es el rótulo del negocio, cuando es distinto: ' +
+            'la papelería de un autónomo, por ejemplo. Se podrá buscar por los ' +
+            'dos, y en el nombre de la carpeta seguirá yendo la razón social.'
+};
+
+/* El cuadro de los datos de un tercero (App.cuadroDeTercero) vive en
+   js/tercero-cuadro.js (fila 489). */
+
+/* Altas con cuadro propio (fila 167: Administraciones): `fn(sugerencia)`
+   abre su cuadro, guarda, y devuelve la persona nueva o null. */
+App.ALTAS_DE_CATEGORIA = {};
+
+/* Si una categoría admite alta a mano (fila 166: los tutores legales no,
+   salen solos del RegAlum). */
+App.admiteAlta = function (categoria) {
+  if (App.ALTAS_DE_CATEGORIA[categoria]) return true;
+  var def = Datos.LISTAS[categoria];
+  return !!def && !def.sinAlta;
+};
+
+/* Fila 197 (docs/NUEVO-ASUNTO-PERSONA-PRIMERO.md): sin ninguna
+   pastilla de categoría pulsada, "+ Dar de alta" no sabe en cuál
+   meter a la persona nueva, así que pide la categoría enseñando un
+   botón por cada una que admita alta (App.botonAlta, con una sola
+   categoría ya fijada, sigue igual que siempre). */
+App.botonesAlta = function (texto) {
+  /* Fila 493: solo las clases que admite el tipo elegido (todas si no hay tipo). */
+  var permitidas = App.clasesPermitidasNuevo();
+  return Nombres.CATEGORIAS.filter(function (c) { return App.admiteAlta(c) && permitidas.indexOf(c) !== -1; }).map(function (cat) {
+    var b = document.createElement('button');
+    b.className = 'boton';
+    b.style.marginTop = '6px';
+    b.style.marginRight = '6px';
+    b.textContent = cat === 'ALUMNADO'
+      ? '+ Dar de alta un solicitante'
+      : '+ Dar de alta en ' + Nombres.textoCategoria(cat, 'lista');
+    b.onclick = function () { App.altaTercero(cat, texto); };
+    return b;
+  });
+};
+
+/* Fila 197: el buscador único de "Nuevo asunto" busca en varias
+   categorías a la vez. Carga cada una con Datos.cargar y filtra con
+   Datos.buscar, tal cual App.buscarPersonas hace con una sola
+   (js/archivo-personas.js); no se reinventa esa lógica, solo se repite
+   por categoría. En ALUMNADO, matriculados y solicitantes antes que
+   los antiguos, el mismo criterio que ya usa Personas
+   (js/personas-familias.js, PersonasFamilias.pintar). */
+App.buscarEnCategorias = async function (texto, categorias, topePorCategoria) {
+  var salida = [];
+  for (var i = 0; i < categorias.length; i++) {
+    var categoria = categorias[i];
+    try {
+      var fuente = await Datos.cargar(App.E.datos, categoria);
+      var encontrados = Datos.buscar(fuente.lista, texto, topePorCategoria);
+      if (categoria === 'ALUMNADO') {
+        var actuales = encontrados.filter(function (p) { return p.matriculado || p.solicitante; });
+        var antiguos = encontrados.filter(function (p) { return !p.matriculado && !p.solicitante; });
+        encontrados = actuales.concat(antiguos);
+      }
+      salida.push({ categoria: categoria, fuente: fuente, resultados: encontrados });
+    } catch (e) {
+      salida.push({ categoria: categoria, fuente: null, resultados: [] });
+    }
+  }
+  return salida;
+};
+
+/* Fila 386 (docs/AVISO-PERSONA-EN-OTRA-LISTA.md): con un tipo o una
+   categoría de ALUMNADO o PERSONAL elegidos, si la persona buscada no
+   está en esa lista pero sí en la otra, se avisa en vez de dejar dar de
+   alta un duplicado. Devuelve true si ha pintado el aviso en `caja`.
+   `alOtra` se llama al pulsar «Es otra persona». */
+App.avisoPersonaEnOtraLista = async function (texto, caja, alOtra) {
+  var cat = App.E.nuevo.categoria;
+  if (cat !== 'ALUMNADO' && cat !== 'PERSONAL') return false;
+  var clave = U.normalizar(texto);
+  if (App.E.nuevo.otraPersona === clave) return false;
+  var otra = cat === 'ALUMNADO' ? 'PERSONAL' : 'ALUMNADO';
+  var hallados = (await App.buscarEnCategorias(texto, [otra], 5))[0].resultados;
+  if (!hallados.length) return false;
+  caja.innerHTML = '';
+  var lista = Nombres.textoCategoria(cat, 'lista');
+  hallados.forEach(function (p) {
+    var d = document.createElement('div');
+    d.className = 'aviso-otra-lista';
+    d.style.cssText = 'border:1px solid #d9a400;background:#fff8e1;border-radius:6px;padding:8px;margin:6px 0';
+    var frase = App.E.nuevo.tipo
+      ? 'Este tipo es de ' + U.escapar(lista.toLowerCase()) + '.'
+      : 'Has elegido <strong>' + U.escapar(lista) + '</strong>.';
+    d.innerHTML = '<div><strong>' + U.escapar(p.nombre) + '</strong> está en <strong>' +
+      U.escapar(Nombres.textoCategoria(p.categoria, 'lista')) + '</strong>. ' + frase + '</div>';
+    var si = document.createElement('button');
+    si.className = 'boton boton-esa-persona';
+    si.style.marginRight = '6px';
+    si.textContent = App.E.nuevo.tipo ? 'Es esa persona: elegir otro tipo' : 'Es esa persona: cambiar';
+    si.onclick = function () { App.E.nuevo.tipoEnLinea = false; App.fijarTercero(p); App.irAlSiguienteHueco(); };   /* fila 489 */
+    var no = document.createElement('button');
+    no.className = 'boton boton-otra-persona';
+    no.textContent = 'Es otra persona';
+    no.onclick = function () { App.E.nuevo.otraPersona = clave; alOtra(); };
+    var fila = document.createElement('div');
+    fila.style.marginTop = '6px';
+    fila.appendChild(si); fila.appendChild(no);
+    d.appendChild(fila);
+    caja.appendChild(d);
+  });
+  return true;
+};
+
+/* Tras dar de alta, queda elegido sin tener que volver a pulsarlo
+   (fila 173, docs/NUEVO-ASUNTO-SIN-REPETIR.md, punto 3): si estamos en
+   Nuevo asunto y en la misma categoría, se llama a App.fijarTercero con
+   el recién creado, en vez de relanzar la búsqueda y esperar el clic.
+   Si por lo que sea no se encuentra, se deja el camino de siempre.
+
+   `alDarDeAlta(nueva)` (fila 219): con él, ese es el único sitio que
+   decide qué hacer con la persona recién dada de alta (o `null` si no
+   se ha podido encontrar tras guardarla) — para reusar el alta desde
+   un buscador que no es el de «Nuevo asunto» (el de «Cambiar el
+   asunto», js/asuntos-editar-tercero.js) sin tocar App.E.nuevo ni
+   #buscar-tercero. Sin él, el comportamiento de siempre. */
+App.altaTercero = async function (categoria, sugerencia, alDarDeAlta) {
+  if (App.ALTAS_DE_CATEGORIA[categoria]) {
+    var nueva = await App.ALTAS_DE_CATEGORIA[categoria](sugerencia);
+    if (!nueva) return;
+    U.aviso('Dado de alta.', 'bueno');
+    if (alDarDeAlta) { alDarDeAlta(nueva); return; }
+    if (App.E.nuevo.categoria === categoria) { App.fijarTercero(nueva); App.irAlSiguienteHueco(); return; }
+    return;
+  }
+  var def = Datos.LISTAS[categoria];
+  if (!def || def.sinAlta) return;
+  var titulo = categoria === 'ALUMNADO'
+    ? 'Dar de alta un solicitante'
+    : 'Dar de alta en ' + categoria;
+  var deEntrada = {};
+  deEntrada[def.cabecera[0]] = sugerencia || '';
+  var valores = await App.cuadroDeTercero(categoria, deEntrada, titulo);
+  if (!valores) return;
+  var fuente = await Datos.anadirALista(App.E.datos, categoria, valores);
+  U.aviso('Dado de alta.', 'bueno');
+  var nombreNuevo = valores[def.cabecera[0]];
+  var creado = fuente && fuente.lista && fuente.lista.filter(function (p) { return p.nombre === nombreNuevo; })[0];
+  if (alDarDeAlta) { alDarDeAlta(creado || null); return; }
+  if (App.E.nuevo.categoria === categoria && creado) { App.fijarTercero(creado); App.irAlSiguienteHueco(); return; }
+  $('buscar-tercero').value = nombreNuevo;
+  App.buscarTercero();
+};
+
+/* ---------- el buscador de terceros, reutilizable ----------
+
+   Lo mismo que hay dentro de "Nuevo asunto" (categoría + buscador +
+   resultados + alta), pero como una pieza que se puede montar en
+   cualquier otra pantalla: js/relacionados.js lo usa para elegir un
+   tercero relacionado, sin repetir la lógica de búsqueda.
+
+   `contenedor` es un elemento vacío donde se pinta todo.
+   `categoriaInicial` puede venir puesta, o null para empezar sin
+   categoría elegida.
+   `alElegir(categoria, persona, textoBuscado)` se llama cuando el
+   usuario pulsa un resultado (persona no es null) o pide dar de alta
+   uno nuevo (persona es null, y textoBuscado trae lo que había
+   escrito). El alta de verdad la hace quien llama, con
+   App.cuadroDeTercero: así aquí no se abren dos cuadros a la vez.
+
+   `opciones.textoInicial` (fila 562): al elegir la primera categoría, el buscador sale con ese texto ya escrito.
+
+   `opciones.categorias` (fila 306): solo esas categorías salen para elegir.
+
+   `opciones.multiple` (17-sep-2026, fila 21, docs/GRUPOS-DE-PERSONAS.md):
+   cada resultado lleva una casilla en vez de pulsarse directamente, y
+   abajo sale una barra fija con la cuenta y "Añadir los N señalados".
+   Lo señalado no se pierde al cambiar de búsqueda ni de categoría (vive
+   en `estado.marcados`, fuera de `buscar()`). En este modo `alElegir`
+   se llama UNA VEZ, con la lista de señalados (`{categoria, nombre,
+   persona}`), al pulsar ese botón; no hay "dar de alta" aquí, porque no
+   tiene sentido en un alta en bloque. Devuelve `{ marcar(lista),
+   marcados() }` para que quien llama pueda señalar desde fuera (los
+   atajos de alumnado, "meter un grupo entero"): en el modo de siempre
+   no devuelve nada, como hasta hoy. */
+App.pintarBuscadorDeTercero = function (contenedor, categoriaInicial, alElegir, opciones) {
+  var multiple = !!(opciones && opciones.multiple);
+  var estado = { categoria: categoriaInicial || null, marcados: {} };
+  if (multiple && opciones.marcadosIniciales) {
+    opciones.marcadosIniciales.forEach(function (m) {
+      estado.marcados[m.categoria + '|' + m.nombre] = m;
+    });
+    resolverPerdidos(opciones.marcadosIniciales);
+  }
+
+  /* Un marcado inicial (los miembros de un grupo al editarlo) puede ya
+     no estar en las listas de hoy: alguien se ha ido, o se ha borrado
+     a mano. Se marca como "perdido" para que la barra lo diga, sin
+     quitarlo de nada (docs/GRUPOS-DE-PERSONAS.md, "Personas que ya no
+     están"). Los que traigan `persona` (los atajos de alumnado, ya
+     resueltos) no hace falta comprobarlos. */
+  async function resolverPerdidos(iniciales) {
+    var porCategoria = {};
+    iniciales.forEach(function (m) {
+      if (m.persona) return;
+      if (!porCategoria[m.categoria]) porCategoria[m.categoria] = [];
+      porCategoria[m.categoria].push(m);
+    });
+    for (var categoria in porCategoria) {
+      var fuente = null;
+      try { fuente = App.E.datos ? await Datos.cargar(App.E.datos, categoria) : null; }
+      catch (e) { fuente = null; }
+      porCategoria[categoria].forEach(function (m) {
+        var clave = m.categoria + '|' + m.nombre;
+        var entrada = estado.marcados[clave];
+        if (!entrada) return;   /* se ha quitado con la × mientras se leía */
+        var encontrado = !!(fuente && fuente.lista.some(function (p) { return App.textoTercero(p) === m.nombre; }));
+        if (!encontrado) entrada.perdido = true;
+      });
+    }
+    pintarBarra();
+  }
+
+  /* Fila 338: `opciones.sitioPegar` (un elemento) pone «Pegar una lista» ahí, al final del cuadro, y
+     `opciones.sitioBarra` (otro) pone lo señalado, «Cancelar» y el botón principal en un pie fijo. */
+  var htmlPegar = multiple ? '<div id="rel-pegar-fila"><button type="button" class="boton" id="rel-pegar">Pegar una lista</button></div>' +
+    '<div id="rel-pegar-sitio"></div>' : '';   /* fila 296: js/lista-pegada-pantalla.js */
+  var sitioPegar = multiple && opciones.sitioPegar ? opciones.sitioPegar : null;
+  var sitioBarra = multiple && opciones.sitioBarra ? opciones.sitioBarra : null;
+  if (sitioPegar) sitioPegar.innerHTML = htmlPegar;
+  contenedor.innerHTML =
+    (sitioPegar ? '' : htmlPegar) +
+    '<div class="categorias-mini" id="rel-categorias"></div>' +
+    '<div id="rel-buscador" class="oculto">' +
+      '<input id="rel-buscar" class="campo" placeholder="Escribe dos letras del nombre">' +
+      '<div id="rel-resultados" class="resultados"></div>' +
+    '</div>' +
+    (multiple && !sitioBarra ? '<div id="rel-marcados-barra" class="marcados-barra oculto"></div>' : '');
+
+  var cajaCategorias = contenedor.querySelector('#rel-categorias');
+  var cajaBuscador = contenedor.querySelector('#rel-buscador');
+  var campoBuscar = contenedor.querySelector('#rel-buscar');
+  var cajaResultados = contenedor.querySelector('#rel-resultados');
+  var cajaBarra = multiple ? (sitioBarra || contenedor.querySelector('#rel-marcados-barra')) : null;
+
+  function listaDeMarcados() {
+    return Object.keys(estado.marcados).map(function (k) { return estado.marcados[k]; });
+  }
+
+  /* La cuenta, la lista de nombres (cada uno con su × para quitarlo
+     sin tener que volver a buscarlo) y el botón de añadir. Un
+     marcado puede no salir nunca en ningún resultado de búsqueda —por
+     ejemplo, un miembro de un grupo que ya no está en las listas—, así
+     que quitarlo desde aquí es la única manera: nunca se pierde ni se
+     borra solo. */
+  function pintarBarra() {
+    if (!multiple || !cajaBarra) return;   /* fila 293: con marcados que ya traen su `persona`, se llama antes de montar la barra */
+    var lista = listaDeMarcados();
+    if (!lista.length && !sitioBarra) { cajaBarra.className = 'marcados-barra oculto'; cajaBarra.innerHTML = ''; return; }
+    cajaBarra.className = 'marcados-barra';
+    var textoPrincipal = opciones.textoBoton ? opciones.textoBoton(lista.length) : 'Añadir los ' + lista.length + ' señalados';
+    var apagado = !lista.length || (opciones.minimo && lista.length < opciones.minimo);
+    var botonPrincipal = '<button type="button" class="boton boton-principal" id="rel-marcados-anadir"' + (apagado ? ' disabled' : '') + '>' + textoPrincipal + '</button>';
+    cajaBarra.innerHTML = (sitioBarra
+      /* Fila 338: en el pie fijo, la cuenta arriba, los nombres, y «Cancelar» y el principal en una fila a la derecha. */
+      ? '<div class="marcados-cabecera"><span class="marcados-cuenta' + (lista.length ? '' : ' marcados-cuenta-vacia') + '">' +
+          (lista.length ? lista.length + (lista.length === 1 ? ' señalado' : ' señalados') : 'Nadie señalado todavía') + '</span></div>'
+      : '<div class="marcados-cabecera">' +
+          '<span class="marcados-cuenta">' + lista.length + (lista.length === 1 ? ' señalado' : ' señalados') + '</span>' +
+          botonPrincipal +
+        '</div>') +
+      '<div class="marcados-lista">' + lista.map(function (m) {
+        var clave = m.categoria + '|' + m.nombre;
+        return '<span class="marcado-chip' + (m.perdido ? ' marcado-chip-perdido' : '') + '"' +
+          (m.perdido ? ' data-ayuda-clave="ya-no-esta-en-las-listas"' : '') + '>' +
+          U.escapar(m.nombre) +
+          '<button type="button" class="marcado-quitar" data-clave="' + U.escapar(clave) + '" ' +
+          'data-ayuda-clave="quitar-de-lo-senalado">×</button></span>';
+      }).join('') + '</div>' +
+      (sitioBarra ? '<div class="marcados-acciones"><button type="button" class="boton" id="rel-cancelar">Cancelar</button>' + botonPrincipal + '</div>' : '');
+
+    cajaBarra.querySelector('#rel-marcados-anadir').onclick = function () { alElegir(listaDeMarcados()); };
+    var cancelarPie = cajaBarra.querySelector('#rel-cancelar');
+    if (cancelarPie) cancelarPie.onclick = function () { var c = document.getElementById('cuadro-cancelar'); if (c) c.click(); };
+    Array.prototype.forEach.call(cajaBarra.querySelectorAll('.marcado-quitar'), function (b) {
+      var clave = b.dataset.clave;
+      b.onclick = function () {
+        delete estado.marcados[clave];
+        pintarBarra();
+        Array.prototype.forEach.call(cajaResultados.querySelectorAll('.resultado-casilla'), function (c) {
+          if (c.dataset.clave === clave) c.checked = false;
+        });
+      };
+    });
+  }
+
+  function marcar(lista) {
+    lista.forEach(function (m) { estado.marcados[m.categoria + '|' + m.nombre] = m; });
+    pintarBarra();
+    Array.prototype.forEach.call(cajaResultados.querySelectorAll('.resultado-casilla'), function (c) {
+      if (estado.marcados[c.dataset.clave] !== undefined) c.checked = true;
+    });
+  }
+
+  function pintarCategorias() {
+    cajaCategorias.innerHTML = '';
+    Nombres.CATEGORIAS.forEach(function (cat) {
+      if (opciones && opciones.categorias && opciones.categorias.indexOf(cat) === -1) return;   /* fila 306: solo alumnado, o solo personal */
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'categoria-mini-boton' + (estado.categoria === cat ? ' elegido' : '');
+      b.textContent = cat;
+      b.onclick = function () {
+        estado.categoria = cat;
+        pintarCategorias();
+        cajaBuscador.classList.remove('oculto');
+        campoBuscar.value = '';
+        cajaResultados.innerHTML = '';
+        campoBuscar.focus();
+        /* Fila 562: lo escrito en el correo sale ya puesto en el buscador (solo al elegir la primera categoría). */
+        if (opciones && opciones.textoInicial) { campoBuscar.value = opciones.textoInicial; opciones.textoInicial = ''; buscar(); }
+        if (opciones && opciones.alCambiarCategoria) opciones.alCambiarCategoria(cat);
+      };
+      cajaCategorias.appendChild(b);
+    });
+  }
+
+  var temporizador = null;
+  async function buscar() {
+    var texto = campoBuscar.value;
+    if (U.normalizar(texto).length < 2) { cajaResultados.innerHTML = ''; return; }
+    cajaResultados.innerHTML = '<div class="explica">Buscando…</div>';
+    var fuente = await Datos.cargar(App.E.datos, estado.categoria);
+    var encontrados = Datos.buscar(fuente.lista, texto, 30);
+    cajaResultados.innerHTML = '';
+
+    encontrados.forEach(function (p) {
+      var d = document.createElement('div');
+      var nombre = App.textoTercero(p);
+
+      if (multiple) {
+        var clave = estado.categoria + '|' + nombre;
+        d.className = App.claseDeResultado(p) + ' resultado-marcable';
+        d.innerHTML =
+          '<label>' +
+            '<input type="checkbox" class="resultado-casilla" data-clave="' + U.escapar(clave) + '"' +
+              (estado.marcados[clave] !== undefined ? ' checked' : '') + '>' +
+            '<span><div>' + U.escapar(p.nombre) + '</div>' +
+            '<div class="resultado-pie">' + U.escapar(App.pieDe(p)) + '</div></span>' +
+          '</label>';
+        d.querySelector('.resultado-casilla').onchange = function (ev) {
+          if (ev.target.checked) estado.marcados[clave] = { categoria: estado.categoria, nombre: nombre, persona: p };
+          else delete estado.marcados[clave];
+          pintarBarra();
+        };
+      } else {
+        d.className = App.claseDeResultado(p);
+        d.innerHTML = '<div>' + U.escapar(p.nombre) + '</div>' +
+                      '<div class="resultado-pie">' + U.escapar(App.pieDe(p)) + '</div>';
+        d.onclick = function () { alElegir(estado.categoria, p, texto); };
+      }
+      cajaResultados.appendChild(d);
+    });
+
+    if (!multiple && App.admiteAlta(estado.categoria)) {
+      var alta = document.createElement('button');
+      alta.type = 'button';
+      alta.className = 'boton';
+      alta.style.marginTop = '6px';
+      alta.textContent = estado.categoria === 'ALUMNADO'
+        ? '+ Dar de alta un solicitante' : '+ Dar de alta uno nuevo';
+      alta.onclick = function () { alElegir(estado.categoria, null, texto); };
+      cajaResultados.appendChild(alta);
+    }
+  }
+
+  campoBuscar.oninput = function () {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(buscar, 180);
+  };
+
+  if (multiple) {
+    var botonPegar = (sitioPegar || contenedor).querySelector('#rel-pegar');
+    botonPegar.onclick = function () {
+      botonPegar.parentNode.classList.add('oculto');
+      ListaPegada.abrir((sitioPegar || contenedor).querySelector('#rel-pegar-sitio'), {
+        categoria: function () { return estado.categoria; }, marcar: marcar, alSenalar: opciones.alSenalar,
+        alCerrar: function () { botonPegar.parentNode.classList.remove('oculto'); }
+      });
+    };
+  }
+
+  pintarCategorias();
+  if (estado.categoria) cajaBuscador.classList.remove('oculto');
+  pintarBarra();
+
+  if (multiple) return { marcar: marcar, marcados: listaDeMarcados };
+};

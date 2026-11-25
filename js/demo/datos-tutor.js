@@ -1,0 +1,161 @@
+/* ============================================================
+   demo/datos-tutor.js — lo que necesita el correo al tutor o tutora del
+   grupo (fila 299, docs/CORREO-AL-TUTOR-DEL-GRUPO.md) en la copia de pruebas:
+     1. la relación de funciones tutoriales de este curso y del anterior (fila 376: las fichas
+        `TUTORIAS-HECHO <curso>.json` que deja el Centro de datos, en la carpeta de datos): 4º A con un tutor que
+        tiene correo en PERSONAL (Otero Campos, Marta), 1º Bach A con una tutora sin
+        correo (Cabello Ruiz, Esperanza, que js/demo/datos.js da de alta en RelPerCen
+        sin correo), 2º B con dos tutores en vigor (Reyes Palma, Fernando y Uceda Molina,
+        Patricia) y 1º C sin ninguno;
+     2. el tipo SANCION, con el hito «Notificar al tutor/a» y una tarea de comunicar sin
+        detalles (la pasada de js/informar-al-tutor.js, que se lanza al acabar de montar,
+        lo deja como «Informar al tutor/a»), y cuatro asuntos abiertos suyos: Jimenez
+        Rubio, Mateo (4º A, con un PDF NOTIFICACION en su carpeta), Fuentes Calvo, Rubén
+        (1º Bach A, sin él), Delgado Prieto, Iker (2º B, dos tutores) y Klein Soto, Ana
+        (1º C, sin tutor);
+     3. un asunto de otro tipo (INCIDENCIA DE AULA, también de Jimenez Rubio, Mateo, 4º A: los
+        demás alumnos de 4º A ya tienen asuntos que otras pruebas buscan por su nombre) cuyo hito
+        lleva la tarea «Avisar a la tutoría», sin detalles.
+   Todo inventado. `Demo.tutor.construir({ crearTipoConGuia, crearAsunto, hace })` y
+   `Demo.tutor.alAcabar()` los llama js/demo/datos.js.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  /* Fila 376: las tutorías llegan como las deja el Centro de datos (`hecho/tutorias/<curso>/curso.json`, ya copiadas a la
+     carpeta de datos como `TUTORIAS-HECHO <curso>.json`), de dos cursos: el de hoy y el anterior. */
+  function lineaDeTutor(empleado, documento, inicio) {
+    var partes = empleado.split(', ');
+    return { id: documento, documento: documento, empleado: empleado, apellidos: partes[0], nombre: partes[1],
+             periodo: '01/09/' + inicio + ' - 31/08/' + (inicio + 1), desde: inicio + '-09-01', hasta: (inicio + 1) + '-08-31',
+             sustituto: false, hoy: true, enPersonal: true };
+  }
+
+  function parteDeTutorias(inicio, grupos, sinGrupo) {
+    var corto = String(inicio).slice(2) + '-' + String(inicio + 1).slice(2);
+    return {
+      nombre: 'TUTORIAS-HECHO ' + corto + '.json',
+      parte: {
+        acuerdoHecho: 1, conjunto: 'tutorias', parte: 'curso', cursoEscolar: corto, generado: new Date().toISOString(),
+        origen: 'centro-de-datos-ies', hoy: '', campos: [], avisos: [],
+        registros: grupos.map(function (g) {
+          var tutores = g[1].map(function (t) { return lineaDeTutor(t[0], t[1], inicio); });
+          return { id: g[0], datos: { unidad: g[0], tutores: tutores, tutorHoy: tutores.length === 1 ? tutores[0].empleado : '' } };
+        }),
+        funcionesSinGrupo: sinGrupo.map(function (t) { return lineaDeTutor(t[0], t[1], inicio); })
+      }
+    };
+  }
+
+  async function escribirTutorias() {
+    var hoy = new Date();
+    var inicio = hoy.getMonth() >= 8 ? hoy.getFullYear() : hoy.getFullYear() - 1;
+    var cursos = [
+      parteDeTutorias(inicio,
+        [['4º A', [['Otero Campos, Marta', '11223344A']]], ['1º Bach A', [['Cabello Ruiz, Esperanza', '77889900G']]],
+         ['2º B', [['Reyes Palma, Fernando', '22334455B'], ['Uceda Molina, Patricia', '33445566C']]]],
+        [['Vidal Cano, Ramón', '44556677D']]),
+      /* El curso anterior: Otero Campos, Marta ya era tutora (de otro grupo), para el certificado de dos cursos. */
+      parteDeTutorias(inicio - 1, [['3º A', [['Otero Campos, Marta', '11223344A']]]], [['Vidal Cano, Ramón', '44556677D']])
+    ];
+    for (var i = 0; i < cursos.length; i++) {
+      await Carpetas.escribirTexto(App.E.datos, cursos[i].nombre, JSON.stringify(cursos[i].parte));
+    }
+    if (window.TablasDatos) TablasDatos.olvidar();
+  }
+
+  /* Fila 572 (docs/572-SUS-PROFESORES-POR-ALUMNO.md): el profesorado como lo deja el Centro de datos, ya copiado a la carpeta de datos
+     (`PROFESORADO-GRUPOS-HECHO <curso>.json` y `PROFESORADO-ALUMNOS-HECHO <curso>.json`), del curso de hoy.
+     4º A: Matemáticas y Física y Química las da Otero Campos (dos materias, un solo profesor), Lengua Reyes Palma, Inglés Cabello Ruiz
+     (sin correo en su ficha) y Geografía e Historia Uceda Molina, que NO le da clase a Jimenez Rubio, Mateo (2100011).
+     1º Bach A: Fuentes Calvo, Rubén (2100007) tiene Inglés con Cabello Ruiz. */
+  async function escribirProfesorado() {
+    var curso = U.cursoActual();
+    var DOC = { 'Otero Campos, Marta': '11223344A', 'Reyes Palma, Fernando': '22334455B', 'Uceda Molina, Patricia': '33445566C', 'Cabello Ruiz, Esperanza': '77889900G' };
+    var lineas = [
+      ['4º A', 'Matemáticas', 'Otero Campos, Marta'], ['4º A', 'Física y Química', 'Otero Campos, Marta'],
+      ['4º A', 'Lengua Castellana y Literatura', 'Reyes Palma, Fernando'], ['4º A', 'Inglés', 'Cabello Ruiz, Esperanza'],
+      ['4º A', 'Geografía e Historia', 'Uceda Molina, Patricia'], ['1º Bach A', 'Inglés', 'Cabello Ruiz, Esperanza']
+    ];
+    var base = { acuerdoHecho: 1, parte: 'curso', cursoEscolar: curso, generado: new Date().toISOString(), origen: 'centro-de-datos-ies', campos: [], avisos: [] };
+    var grupos = Object.assign({ conjunto: 'profesorado-grupos', registros: lineas.map(function (l, i) {
+      return { id: 'g-demo' + i, datos: { nivel: l[0].indexOf('Bach') !== -1 ? '1º de Bachillerato' : '4º de E.S.O.', unidad: l[0], materia: l[1], profesor: l[2], fichaConjunto: 'personal', fichaId: DOC[l[2]] } };
+    }) }, base);
+    var alumnos = Object.assign({ conjunto: 'profesorado-alumnos', registros: [
+      { id: '2100011', datos: { alumno: 'Jimenez Rubio, Mateo', unidad: '4º A', profesores: [
+        { materia: 'Matemáticas', profesor: 'Otero Campos, Marta' }, { materia: 'Física y Química', profesor: 'Otero Campos, Marta' },
+        { materia: 'Lengua Castellana y Literatura', profesor: 'Reyes Palma, Fernando' }, { materia: 'Inglés', profesor: 'Cabello Ruiz, Esperanza' }] } },
+      { id: '2100007', datos: { alumno: 'Fuentes Calvo, Rubén', unidad: '1º Bach A', profesores: [{ materia: 'Inglés', profesor: 'Cabello Ruiz, Esperanza' }] } }
+    ] }, base);
+    await Carpetas.escribirTexto(App.E.datos, 'PROFESORADO-GRUPOS-HECHO ' + curso + '.json', JSON.stringify(grupos));
+    await Carpetas.escribirTexto(App.E.datos, 'PROFESORADO-ALUMNOS-HECHO ' + curso + '.json', JSON.stringify(alumnos));
+    if (window.Horario) Horario.olvidar();
+  }
+
+  async function pdf(texto) {
+    var PDFLib = await PdfHerramientas.cargarPdfLib();
+    var doc = await PDFLib.PDFDocument.create();
+    var fuente = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    doc.addPage([595, 842]).drawText(texto, { x: 50, y: 780, size: 12, font: fuente });
+    return doc.save();
+  }
+
+  async function construir(o) {
+    await escribirTutorias();
+    await escribirProfesorado();   /* fila 572 */
+    /* El sexo de los cuatro alumnos (su RegAlum no trae la columna «Sexo»): «al alumno» sale ya resuelto.
+       Una sola escritura de `sexos.json` (el montaje de la demostración tiene que seguir siendo rápido). */
+    try {
+      var sexos = (await Carpetas.leerJson(App.E.gestor, 'sexos.json')) || {};
+      [['2100011', 'Jimenez Rubio, Mateo', 'H'], ['2100007', 'Fuentes Calvo, Rubén', 'H'], ['2100005', 'Delgado Prieto, Iker', 'H'],
+       ['2100012', 'Klein Soto, Ana', 'M']].forEach(function (a) { sexos[Genero.claveDe({ id: a[0], nombre: a[1] }, 'ALUMNADO')] = a[2]; });
+      await Copias.guardar(App.E.gestor, 'sexos.json', sexos);
+      await Genero.leer();
+    } catch (e) { /* sin el sexo, la plantilla deja la forma doble */ }
+
+    var sancion = await o.crearTipoConGuia('SANCION', 'ALUMNADO', [
+      { titulo: 'Notificar al tutor/a', cuerpo: '<p>Que la tutoría sepa qué medida se ha tomado con su alumno o alumna.</p>', responsable: 'yo',
+        guion: [{ id: 'g-demo-tutor-avisar', texto: 'Avisar al tutor/a', accion: 'comunicar' }] },
+      { titulo: 'Entregar la notificación a la familia', cuerpo: '<p>En mano, con acuse de recibo.</p>', responsable: 'yo' }
+    ], null);
+    /* Fila 615: un campo de lista en este tipo («¿Quién lo pide?»), para ver el aviso de parecidos con «Usar» al crear uno parecido desde «Cuándo se hace» de otro tipo. */
+    await Campos.guardarPropios(App.E.gestor, function (lista) {
+      lista.push({ id: 'p-demo-quien-lo-pide', nombre: '¿Quién lo pide?', clase: 'lista', valores: ['Familia', 'Tutoría', 'Jefatura de estudios'], grupo: 'Asunto' });
+      return lista;
+    });
+    var configSancion = ((await Campos.leer(App.E.gestor)).porTipo || {}).SANCION || [];
+    await Campos.guardarConfigDeTipo(App.E.gestor, 'SANCION', configSancion.concat([{ origen: 'propio', id: 'p-demo-quien-lo-pide', obligatorio: false, enNombre: false }]));
+    App.E.campos = await Campos.leer(App.E.gestor);
+    var alumnos = [['Jimenez Rubio, Mateo', '2100011', true], ['Fuentes Calvo, Rubén', '2100007', false],
+                   ['Delgado Prieto, Iker', '2100005', false], ['Klein Soto, Ana', '2100012', false]];
+    for (var i = 0; i < alumnos.length; i++) {
+      var clave = await o.crearAsunto(sancion, 'ALUMNADO', Nombres.terceroAlumno({ nombre: alumnos[i][0], id: alumnos[i][1] }), o.hace(9), {
+        abiertoEl: o.hace(9) + 'T09:00:00.000Z'
+      });
+      if (!alumnos[i][2]) continue;
+      var carpeta = await App.E.abiertos.getDirectoryHandle(clave);
+      var numeroDoc = (await Numeros.reservar('documentos', '')).numero;
+      var nombre = Nombres.montarDocumento({ fecha: o.hace(9), tipo: 'NOTIFICACION', extension: 'pdf', numeroDoc: numeroDoc });
+      await Carpetas.escribirBytes(carpeta, nombre, await pdf('Notificación de la medida disciplinaria (copia de pruebas)'), 'application/pdf');
+      await DocumentosDatos.anotar(clave, numeroDoc, { tipo: 'NOTIFICACION', fecha: o.hace(9), texto: '', campos: [], valores: {}, registros: [] });
+    }
+
+    var incidencia = await o.crearTipoConGuia('INCIDENCIA DE AULA', 'ALUMNADO', [
+      { titulo: 'Comunicar la incidencia', cuerpo: '<p>Que la tutoría lo sepa el mismo día.</p>', responsable: 'yo',
+        guion: [{ id: 'g-demo-tutoria-avisar', texto: 'Avisar a la tutoría', accion: 'comunicar' }] }
+    ], null);
+    await o.crearAsunto(incidencia, 'ALUMNADO', Nombres.terceroAlumno({ nombre: 'Jimenez Rubio, Mateo', id: '2100011' }), o.hace(9), {
+      abiertoEl: o.hace(9) + 'T09:00:00.000Z'
+    });
+  }
+
+  /* Al acabar de montar (ya recargado): la pasada que deja «Informar al tutor/a» (js/informar-al-tutor.js). */
+  async function alAcabar() {
+    if (!window.InformarAlTutor) return;
+    for (var i = 0; i < 40 && window.ColaGuardado && ColaGuardado.hayGuardado(); i++) await new Promise(function (ok) { setTimeout(ok, 25); });
+    try { await InformarAlTutor.pasada({ forzar: true }); } catch (e) { /* sin la pasada, la demostración sigue igual */ }
+  }
+
+  window.Demo = window.Demo || {};
+  window.Demo.tutor = { construir: construir, alAcabar: alAcabar };
+})();

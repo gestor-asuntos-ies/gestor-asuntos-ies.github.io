@@ -1,0 +1,64 @@
+/* ============================================================
+   reintentar-escritura.js — reintentar una escritura en disco que
+   tropieza con Dropbox sincronizando (fila 90,
+   docs/ARCHIVAR-SIN-AVISOS-FALSOS.md).
+
+   Un InvalidStateError o un NoModificationAllowedError al escribir un
+   fichero casi siempre es Dropbox sincronizando esa misma carpeta en
+   ese instante, no un fallo de verdad: un intento un momento después
+   casi siempre sale bien. Un solo sitio para esto, que usan
+   Carpetas.escribirTexto y Carpetas.escribirBytes (así se arregla de
+   una vez toda escritura de la aplicación: Copias.guardar, guardarJson
+   y _ficha.json pasan todas por ahí). Cualquier otro error se lanza a
+   la primera, sin esperar ni reintentar.
+
+   Se carga antes que js/carpetas.js en index.html.
+   ============================================================ */
+var Reintentar = (function () {
+
+  /* Un intento normal, más tres reintentos si hace falta, con estas
+     esperas por delante de cada uno. Si el tercer reintento también
+     falla, se lanza el error tal cual. */
+  var ESPERAS_MS = [500, 1000, 2000];
+
+  function esperar(ms) {
+    return new Promise(function (r) { setTimeout(r, ms); });
+  }
+
+  /* NotReadableError y AbortError (fila 99, docs/GUARDAR-EN-FILA.md):
+     Dropbox tocando un fichero recién escrito, al leerlo o al
+     escribirlo. También son pasajeros. */
+  function esErrorDeSincronizacion(e) {
+    var nombre = e && e.name;
+    return nombre === 'InvalidStateError' || nombre === 'NoModificationAllowedError' ||
+           nombre === 'NotReadableError' || nombre === 'AbortError';
+  }
+
+  /* `intento` es una función que hace la escritura ENTERA, desde pedir
+     el manejador del fichero: así cada reintento pide uno nuevo, en
+     vez de reutilizar uno que ya ha dejado de servir. */
+  async function escritura(intento, dir, nombre) {
+    for (var i = 0; i <= ESPERAS_MS.length; i++) {
+      try {
+        return await intento();
+      } catch (e) {
+        /* Fila 332: cuántas veces se reintenta y cuántas se rinde (`nombre`: solo al escribir; el rótulo sale de una tabla fija). */
+        /* Fila 364: «sin-remedio» solo cuenta lo que nunca llega a guardarse. Un fichero de datos cubierto por
+           el guardado pendiente (js/guardado-pendiente.js) no se rinde aquí: si sale tarde cuenta `tarde:`, y
+           si se tira, `sin-remedio:` lo apunta el propio módulo. */
+        if (window.Medidas && nombre !== undefined && esErrorDeSincronizacion(e)) {
+          var ultimo = i === ESPERAS_MS.length;
+          if (!ultimo) Medidas.cuenta('reintento:' + Medidas.rotuloDeFichero(dir, nombre));
+          else if (!(window.GuardadoPendiente && GuardadoPendiente.cubre(nombre) && dir && dir.name === '_GESTOR')) Medidas.cuenta('sin-remedio:' + Medidas.rotuloDeFichero(dir, nombre));
+        }
+        if (!esErrorDeSincronizacion(e) || i === ESPERAS_MS.length) throw e;
+        await esperar(ESPERAS_MS[i]);
+      }
+    }
+  }
+
+  /* Leer tiene los mismos tropiezos que escribir (fila 99): mismo
+     reintento. */
+  return { escritura: escritura, lectura: escritura, esErrorDeSincronizacion: esErrorDeSincronizacion };
+})();
+window.Reintentar = Reintentar;

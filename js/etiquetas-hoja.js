@@ -1,0 +1,131 @@
+/* ============================================================
+   etiquetas-hoja.js — de las personas a las hojas (fila 344, docs/ETIQUETAS.md).
+
+   Sin pintar nada en la pantalla salvo `vistaHtml`, que devuelve el dibujo de las hojas.
+   - construir(personas, clase, diseno, op) → [{ valores, sinDireccion, sinTutores, personas }]: una por persona, o una por
+     familia (diseño «Una por familia»), ordenadas y con las copias seguidas. `op`: { copias, indice
+     (PersonasFamilias.indice), ctx: { centro, curso }, orden, rango }. `orden` (fila 450): 'grupo' (alumnado: unidad y
+     apellidos; personal: apellidos; el de siempre), 'apellidos', 'nombre' o 'marcado' (`rango(persona)` →
+     { b: bloque, n: puesto en la lista pegada | null }: las del bloque 0 por grupo y apellidos o por la lista
+     pegada, y detrás las demás por bloque).
+   - paginar(items, modelo, gastadas) → { hojas: [[{ i (casilla), item|null }]], etiquetas }. Las casillas
+     `gastadas` ({ "hoja:casilla": true }, las dos desde 0, de cualquier hoja; fila 374) no llevan etiqueta.
+   - rectangulo(modelo, a, b) → los números de casilla del rectángulo que forman las casillas a y b (fila 374).
+   - preparar(items, diseno, modelo, medir) → Map etiqueta → sus líneas ya ajustadas { lineas, corto }.
+   - vistaHtml(paginas, modelo, preparadas, escala) → el HTML de las hojas (escala: píxeles por mm).
+   ============================================================ */
+var EtiquetasHoja = (function () {
+
+  function esc(t) { return U.escapar(String(t == null ? '' : t)); }
+
+  function claveOrden(p, clase) {
+    var u = clase === 'alumnado' ? U.normalizar(p.unidad || '') : '';
+    return u + '|' + U.normalizar(p.nombre || '');
+  }
+
+  function claveNombre(p) {
+    var x = EtiquetasDatos.partes(p.nombre || '');
+    return U.normalizar(x.pila || '') + '|' + U.normalizar(x.apellidos || '');
+  }
+
+  function comparador(clase, orden, rango) {
+    function por(clave) { return function (a, b) { var x = clave(a), y = clave(b); return x < y ? -1 : (x > y ? 1 : 0); }; }
+    var grupo = por(function (p) { return claveOrden(p, clase); });
+    if (orden === 'apellidos') return por(function (p) { return U.normalizar(p.nombre || ''); });
+    if (orden === 'nombre') return por(claveNombre);
+    if (orden === 'marcado' && rango) {
+      return function (a, b) {
+        var x = rango(a), y = rango(b);
+        if (x.b !== y.b) return x.b - y.b;
+        if (x.n != null && y.n != null && x.n !== y.n) return x.n - y.n;
+        return x.n != null && y.n != null ? 0 : grupo(a, b);
+      };
+    }
+    return grupo;
+  }
+
+  function construir(personas, clase, diseno, op) {
+    op = op || {};
+    var copias = Math.max(1, Math.min(50, parseInt(op.copias, 10) || 1));
+    var ordenadas = personas.slice().sort(comparador(clase, op.orden, op.rango));
+    var grupos;
+    var paraTutores = diseno.para === 'tutores';   /* fila 721: una etiqueta por familia, con los tutores */
+    if ((diseno.unaPorFamilia || paraTutores) && clase === 'alumnado' && op.indice) grupos = EtiquetasDatos.familias(ordenadas, op.indice);
+    else grupos = ordenadas.map(function (p) { return [p]; });
+    var items = [];
+    grupos.forEach(function (g) {
+      var v = paraTutores ? EtiquetasTutores.valores(g, op.ctx) : (g.length > 1 ? EtiquetasDatos.valoresDeFamilia(g, clase, op.ctx) : EtiquetasDatos.valores(g[0], clase, op.ctx));
+      var it = { sinTutores: paraTutores && !!v._sinTutores, valores: v, sinDireccion: !!v._sinDireccion && diseno.renglones.some(function (x) { return /domicilio|direccion|cpLocalidad/.test(x.dato); }), personas: g };
+      for (var k = 0; k < copias; k++) items.push(it);
+    });
+    return items;
+  }
+
+  function paginar(items, modelo, gastadas) {
+    var por = modelo.filas * modelo.columnas, malas = gastadas || {};
+    var hojas = [], k = 0, h = 0;
+    while (k < items.length || h === 0) {
+      var hoja = [];
+      for (var i = 0; i < por; i++) {
+        if (malas[h + ':' + i]) { hoja.push({ i: i, item: null, gastada: true }); continue; }
+        hoja.push({ i: i, item: k < items.length ? items[k++] : null });
+      }
+      hojas.push(hoja);
+      h++;
+    }
+    return { hojas: hojas, etiquetas: items.length };
+  }
+
+  function rectangulo(modelo, a, b) {
+    var c = modelo.columnas, f0 = Math.min(Math.floor(a / c), Math.floor(b / c)), f1 = Math.max(Math.floor(a / c), Math.floor(b / c));
+    var c0 = Math.min(a % c, b % c), c1 = Math.max(a % c, b % c), r = [];
+    for (var f = f0; f <= f1; f++) for (var k = c0; k <= c1; k++) r.push(f * c + k);
+    return r;
+  }
+
+  function preparar(items, diseno, modelo, medir) {
+    var g = EtiquetasModelos.geometria(modelo), memo = new Map();
+    items.forEach(function (it) {
+      if (!memo.has(it)) {
+        var a = EtiquetasDisenos.ajustar(EtiquetasDisenos.lineas(diseno, it.valores), g.ancho, g.alto, medir);
+        a.vertical = diseno.vertical || 'centro';   /* fila 350: la letra ya está ajustada; ahora se coloca el bloque */
+        memo.set(it, a);
+      }
+    });
+    return memo;
+  }
+
+  function vistaHtml(paginas, modelo, preparadas, escala) {
+    var g = EtiquetasModelos.geometria(modelo), k = escala, mm = k;
+    var pxPt = (25.4 / 72) * k;
+    return paginas.hojas.map(function (hoja, nh) {
+      var casillas = hoja.map(function (c) {
+        var col = c.i % modelo.columnas, fila = Math.floor(c.i / modelo.columnas);
+        var x = (g.x0 + col * g.px) * mm, y = (g.y0 + fila * g.py) * mm, w = g.ancho * mm, h = g.alto * mm;
+        var estilo = 'left:' + x.toFixed(1) + 'px;top:' + y.toFixed(1) + 'px;width:' + w.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px';
+        if (c.gastada) {
+          return '<div class="et-casilla et-gastada" data-casilla="' + c.i + '" style="' + estilo + '" data-ayuda-clave="casilla-gastada"></div>';
+        }
+        var p = c.item ? preparadas.get(c.item) : null;
+        var clases = 'et-casilla' + (c.item ? '' : ' et-libre') + (c.item && (c.item.sinDireccion || c.item.sinTutores) ? ' et-sin-direccion' : '') + (p && p.corto ? ' et-corta' : '');
+        var dentro = '';
+        if (p) {
+          var alto = p.lineas.reduce(function (s, l) { return s + l.pt * 1.2; }, 0) * pxPt;
+          dentro = '<div class="et-lineas" style="padding:0 ' + (EtiquetasDisenos.RELLENO_MM * mm).toFixed(1) + 'px;top:' + EtiquetasDisenos.inicioY(p.vertical, h, alto, EtiquetasDisenos.RELLENO_MM * mm).toFixed(1) + 'px">' +
+            p.lineas.map(function (l) {
+              return '<div class="et-linea" style="font-size:' + (l.pt * pxPt).toFixed(2) + 'px;text-align:' + (l.alinea === 'centro' ? 'center' : (l.alinea === 'der' ? 'right' : 'left')) + ';font-weight:' + (l.negrita ? 700 : 400) + '">' + esc(l.texto) + '</div>';
+            }).join('') + '</div>';
+          if (c.item.sinDireccion) dentro += '<span class="et-aviso">Sin dirección</span>';
+          if (c.item.sinTutores) dentro += '<span class="et-aviso et-aviso-tutores">Sin tutores</span>';
+          if (p.corto) dentro += '<span class="et-aviso et-aviso-corto">No cabe</span>';
+        }
+        return '<div class="' + clases + '" data-casilla="' + c.i + '" style="' + estilo + '">' + dentro + '</div>';
+      }).join('');
+      return '<div class="et-hoja-caja"><div class="et-hoja-numero">Hoja ' + (nh + 1) + ' de ' + paginas.hojas.length + '</div>' +
+        '<div class="et-hoja" data-hoja="' + nh + '" style="width:' + (g.hojaAncho * mm).toFixed(1) + 'px;height:' + (g.hojaAlto * mm).toFixed(1) + 'px">' + casillas + '</div></div>';
+    }).join('');
+  }
+
+  return { construir: construir, paginar: paginar, rectangulo: rectangulo, preparar: preparar, vistaHtml: vistaHtml };
+})();
+window.EtiquetasHoja = EtiquetasHoja;

@@ -1,0 +1,44 @@
+/* ============================================================
+   papelera.css — el bloque de la papelera en Ajustes.
+
+   Cada fila reutiliza `.fila-tipo` (css/estilos.css) y el botón de
+   peligro ya existente (`.boton-peligro`): no hace falta inventar
+   nada para el aspecto del botón Borrar.
+   ============================================================ */
+
+.fila-papelera {
+  align-items: flex-start;
+  gap: 14px;
+}
+.fila-papelera-pulsable { cursor: pointer; }
+.fila-papelera-pulsable:hover { background: var(--azul-claro); border-color: var(--azul); }
+
+.papelera-icono {
+  font-size: 18px;
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
+
+#aviso-papelera-vieja {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#aviso-papelera-vieja strong { display: inline; }
+
+/* Fila 172, docs/PAPELERA-BUSCADOR.md: la caja de búsqueda y su contador. */
+.papelera-buscador {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.papelera-buscador input { flex: 1; }
+.papelera-buscador .suave { white-space: nowrap; }
+
+/* Fila 203: cuándo se borra del todo (rojo cuando falta poco) y el registro de lo ya borrado. */
+.papelera-se-borra { white-space: nowrap; }
+.papelera-se-borra-pronto { color: var(--rojo-linea); font-weight: 600; }
+.papelera-borrados { margin-top: 16px; }
+.papelera-borrados > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }

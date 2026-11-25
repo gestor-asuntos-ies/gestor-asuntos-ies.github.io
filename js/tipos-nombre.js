@@ -1,0 +1,474 @@
+/* ============================================================
+   tipos-nombre.js — un tipo que cambia de nombre se lleva todo lo suyo
+   (24-sep-2026, fila 126, docs/TIPO-QUE-CAMBIA-DE-NOMBRE.md).
+
+   Lo que en `_GESTOR` va guardado por el NOMBRE del tipo: la guía
+   (`guias.json`, clave = nombre), sus campos (`campos.json` → `porTipo`),
+   las plantillas de correo y de documento (`plantillas.json`, `p.tipo`) y
+   los recurrentes (`recurrentes.json`, `r.tipo`). Los formularios, las
+   palabras clave, el plazo y el estado de partida van dentro del propio
+   tipo en `tipos.json` y viajan solos. Los hitos casan con la guía por el
+   `id` de cada paso (`origenGuia`), que no cambia.
+
+   - `mover(viejo, nuevo)`: lo pasa todo de un nombre a otro. Si el nuevo
+     ya tiene guía o campos: vacío, se sustituye; con contenido, se queda
+     el que más tenga y el otro va a la papelera (nunca se borra sin más).
+     Lo usan `App.renombrarTipo` (aquí abajo, antes en js/ajustes.js) y
+     «Cargar la biblioteca del centro» (js/cargar-biblioteca.js,
+     `fusionarTipos`), que renombra un tipo al nombre largo.
+   - `arreglar()`: una vez al entrar, junta con su tipo lo que se quedó
+     guardado bajo su nombre corto o un alias (el caso real: la guía de
+     DESEMPEÑO FUNCIÓN TUTORIAL tras la fila 123), y quita las plantillas
+     de documento repetidas (mismo nombre y fichero).
+   - `nombresDe(tipo)`: el nombre, el corto y los alias de un tipo,
+     normalizados, para casar plantillas (js/plantillas.js).
+
+   Cada fichero pasa por su cola (`App.enFila`) y se relee antes de
+   escribir. No envuelve nada.
+   ============================================================ */
+var TiposNombre = (function () {
+
+  function n(t) { return U.normalizar(String(t || '')).trim(); }
+
+  function tipoPorNombre(nombre) {
+    var k = n(nombre);
+    return (App.E.tipos || []).filter(function (t) {
+      return n(t.tipo) === k || (t.nombreCorto && n(t.nombreCorto) === k) ||
+        (t.alias || []).some(function (x) { return n(x) === k; });
+    })[0] || null;
+  }
+
+  /* Todos los nombres del tipo que se llame (o se llamó) así. */
+  function nombresDe(nombre) {
+    var t = tipoPorNombre(nombre);
+    var lista = t ? [t.tipo, t.nombreCorto].concat(t.alias || []) : [nombre];
+    var salida = [];
+    lista.forEach(function (x) { if (x && salida.indexOf(n(x)) === -1) salida.push(n(x)); });
+    if (salida.indexOf(n(nombre)) === -1) salida.push(n(nombre));
+    return salida;
+  }
+
+  /* Fila 606 (docs/606-NOMBRE-CORTO-AL-CAMBIAR-EL-NOMBRE.md): las comprobaciones del nombre corto, una sola
+     vez para Ajustes y para «Cambiar el nombre». `texto` ya va limpio y en mayúsculas. Devuelve el motivo
+     por el que no vale, o '' si vale. Un tipo se compara con el nombre corto (o el nombre) de los demás. */
+  function problemaDelCorto(texto, tipo) {
+    if (texto.length > 25) return 'El nombre corto no puede pasar de 25 caracteres.';
+    var otros = (App.E.tipos || []).filter(function (t) { return t !== tipo; })
+      .map(function (t) { return t.nombreCorto || t.tipo; });
+    if (texto && otros.some(function (o) { return n(o) === n(texto); })) return 'Ya lo usa otro tipo: no puede repetirse.';
+    return '';
+  }
+
+  /* Fila 606: el trozo con que una carpeta lleva de verdad el tipo en `desde`: el nombre corto viejo, el largo
+     viejo o un alias (Nombres.leer reconoce los tres). '' si la carpeta no empieza por ninguno ahí. */
+  function trozoDeCarpeta(nombreCarpeta, desde, candidatos) {
+    var lista = candidatos.filter(function (c, i, a) { return c && a.indexOf(c) === i; })
+      .sort(function (x, y) { return y.length - x.length; });
+    for (var i = 0; i < lista.length; i++) {
+      var c = lista[i];
+      if (n(nombreCarpeta.slice(desde, desde + c.length)) === n(c) && nombreCarpeta.charAt(desde + c.length) === ' ') return nombreCarpeta.slice(desde, desde + c.length);
+    }
+    return '';
+  }
+
+  function cuentaPasos(pasos) { return (pasos || []).length; }
+
+  /* ---------- mover ---------- */
+
+  async function moverGuia(viejo, nuevo, r) {
+    var g = App.E.gestor;
+    var guias = null;
+    try { guias = await Carpetas.leerJson(g, 'guias.json'); } catch (e) { guias = null; }
+    guias = (guias && typeof guias === 'object') ? guias : {};
+    var origen = guias[viejo] || [];
+    if (!origen.length) { if (guias[viejo]) await GuiasDelCentro.guardarPasos(viejo, []); return; }
+    var destino = guias[nuevo] || [];
+    var queda = origen;
+    /* Fila 129: la guía mínima sin tocar (js/estado-hito.js) no compite:
+       se queda la de verdad, sin mandar nada a la papelera. */
+    if (window.EstadoHito && EstadoHito.esGuiaMinima(destino)) destino = [];
+    if (destino.length) {
+      var sobra = cuentaPasos(destino) >= cuentaPasos(origen) ? origen : destino;
+      queda = sobra === origen ? destino : origen;
+      if (window.Papelera) {
+        await Papelera.mandarDato('guia', sobra === origen ? viejo : nuevo, null,
+          { tipo: sobra === origen ? viejo : nuevo, pasos: sobra });
+      }
+      r.papelera++;
+    }
+    /* Los `id` de los pasos se conservan tal cual: los hitos casan por ellos. */
+    if (queda !== destino) await GuiasDelCentro.guardarPasos(nuevo, queda);
+    await GuiasDelCentro.guardarPasos(viejo, []);
+    r.guia = true;
+  }
+
+  async function moverCampos(viejo, nuevo, r) {
+    var g = App.E.gestor;
+    var actual = await Campos.leer(g);
+    App.E.campos = await Campos.moverDatosAlCrear(g, viejo, nuevo);   /* fila 629: lo que pedía al crear */
+    var origen = (actual.porTipo || {})[viejo] || [];
+    if (!origen.length) return;
+    var destino = (actual.porTipo || {})[nuevo] || [];
+    var queda = origen;
+    if (destino.length) {
+      var sobraOrigen = destino.length >= origen.length;
+      queda = sobraOrigen ? destino : origen;
+      if (window.Papelera) {
+        await Papelera.mandarDato('campos-de-tipo', sobraOrigen ? viejo : nuevo, null,
+          { tipo: sobraOrigen ? viejo : nuevo, campos: sobraOrigen ? origen : destino });
+      }
+      r.papelera++;
+    }
+    if (queda !== destino) await Campos.guardarConfigDeTipo(g, nuevo, queda);
+    App.E.campos = await Campos.guardarConfigDeTipo(g, viejo, []);
+    r.campos = true;
+  }
+
+  async function moverPlantillas(viejo, nuevo, r) {
+    var k = n(viejo);
+    var datos = await Plantillas.cargar(App.E.gestor);
+    var hay = (datos.lista || []).concat(datos.documentos || []).some(function (p) { return n(p.tipo) === k; });
+    if (!hay) return;
+    await Plantillas.guardar(App.E.gestor, function (a) {
+      (a.lista || []).concat(a.documentos || []).forEach(function (p) {
+        if (n(p.tipo) === k) { p.tipo = nuevo; r.plantillas++; }
+      });
+      return a;
+    });
+  }
+
+  async function moverRecurrentes(viejo, nuevo, r) {
+    var g = App.E.gestor;
+    var lista = null;
+    try { lista = await Carpetas.leerJson(g, 'recurrentes.json'); } catch (e) { lista = null; }
+    if (!Array.isArray(lista)) return;
+    var cambiados = 0;
+    lista.forEach(function (x) { if (x && x.tipo === viejo) { x.tipo = nuevo; cambiados++; } });
+    if (!cambiados) return;
+    await Copias.guardar(g, 'recurrentes.json', lista);
+    r.recurrentes += cambiados;
+    if (window.Recurrentes && Recurrentes._cargar) { try { await Recurrentes._cargar(); } catch (e) { /* se relee al volver */ } }
+  }
+
+  function vacio() { return { guia: false, campos: false, plantillas: 0, recurrentes: 0, papelera: 0 }; }
+
+  async function mover(viejo, nuevo) {
+    var r = vacio();
+    if (!viejo || !nuevo || viejo === nuevo || !App.E.gestor) return r;
+    /* Cada parte, solo si su módulo está cargado. Fila 176: guias.json ya
+       no se envuelve aquí en su propia cola, porque GuiasDelCentro.guardarPasos
+       (llamado dentro de moverGuia) ya pone cada escritura en la cola de
+       'guias.json' por su cuenta; envolverlo aquí además se esperaría a sí
+       mismo (regla de js/cola-guardado.js) y dejaba arreglar() colgado para
+       siempre. */
+    if (window.GuiasDelCentro) await moverGuia(viejo, nuevo, r);
+    if (window.Campos) await App.enFila('campos.json', function () { return moverCampos(viejo, nuevo, r); });
+    if (window.Plantillas) await App.enFila('plantillas.json', function () { return moverPlantillas(viejo, nuevo, r); });
+    await App.enFila('recurrentes.json', function () { return moverRecurrentes(viejo, nuevo, r); });
+    /* Fila 141: los tipos que, al repartir un PDF, crean asuntos de este. */
+    var apuntan = (App.E.tipos || []).filter(function (t) { return t.repartirTipo === viejo; });
+    if (apuntan.length) {
+      apuntan.forEach(function (t) { t.repartirTipo = nuevo; });
+      try { await App.enFila(App.FICHERO_TIPOS, function () { return App.guardarTipos(); }); } catch (e) { /* se guarda con el nombre */ }
+    }
+    return r;
+  }
+
+  function hayAlgo(r) { return r && (r.guia || r.campos || r.plantillas || r.recurrentes); }
+
+  function textoDe(r) {
+    var partes = [];
+    if (r.guia) partes.push('la guía');
+    if (r.campos) partes.push('los campos');
+    if (r.plantillas) partes.push(r.plantillas === 1 ? '1 plantilla' : r.plantillas + ' plantillas');
+    if (r.recurrentes) partes.push(r.recurrentes === 1 ? '1 recurrente' : r.recurrentes + ' recurrentes');
+    if (!partes.length) return '';
+    var t = partes.length > 1 ? partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1] : partes[0];
+    return 'Se ha llevado ' + t + '.';
+  }
+
+  /* ---------- plantillas de documento repetidas ---------- */
+
+  /* Pura: los grupos de repetidas (mismo nombre y fichero), cada uno con
+     la que se queda (la unida a algún paso; si no, la primera). */
+  function repetidas(documentos, idsUnidos) {
+    var grupos = {};
+    (documentos || []).forEach(function (d) {
+      if (!d.fichero) return;
+      var k = n(d.nombre) + '|' + d.fichero;
+      (grupos[k] = grupos[k] || []).push(d);
+    });
+    return Object.keys(grupos).map(function (k) { return grupos[k]; })
+      .filter(function (g) { return g.length > 1; })
+      .map(function (g) {
+        var queda = g.filter(function (d) { return idsUnidos[d.id]; })[0] || g[0];
+        return { queda: queda, sobran: g.filter(function (d) { return d !== queda; }) };
+      });
+  }
+
+  function idsUnidosEnGuias(guias) {
+    var ids = {};
+    (function recorrer(pasos) {
+      (pasos || []).forEach(function (p) {
+        (p.plantillasDocumento || []).forEach(function (id) { ids[id] = true; });
+        (p.opciones || []).forEach(function (o) { recorrer(o.pasos); });
+      });
+    })(Object.keys(guias || {}).reduce(function (a, k) { return a.concat(guias[k] || []); }, []));
+    return ids;
+  }
+
+  async function quitarRepetidas() {
+    var g = App.E.gestor;
+    var guias = null;
+    try { guias = await Carpetas.leerJson(g, 'guias.json'); } catch (e) { guias = null; }
+    var datos = await Plantillas.cargar(g);
+    var grupos = repetidas(datos.documentos, idsUnidosEnGuias(guias));
+    if (!grupos.length) return 0;
+    var fuera = {};
+    for (var i = 0; i < grupos.length; i++) {
+      for (var j = 0; j < grupos[i].sobran.length; j++) {
+        var d = grupos[i].sobran[j];
+        fuera[d.id] = true;
+        if (window.Papelera) await Papelera.mandarDato('plantilla-documento', d.nombre, null, { plantilla: d });
+      }
+    }
+    await App.enFila('plantillas.json', function () {
+      return Plantillas.guardar(g, function (a) {
+        a.documentos = (a.documentos || []).filter(function (d) { return !fuera[d.id]; });
+        return a;
+      });
+    });
+    return Object.keys(fuera).length;
+  }
+
+  /* ---------- arreglo al entrar ---------- */
+
+  async function arreglar() {
+    if (!App.E.gestor || !(App.E.tipos || []).length) return { juntados: [], repetidas: 0 };
+    var guias = null, campos = null, recurrentes = null;
+    try { guias = await Carpetas.leerJson(App.E.gestor, 'guias.json'); } catch (e) { guias = null; }
+    try { campos = await Campos.leer(App.E.gestor); } catch (e) { campos = null; }
+    try { recurrentes = await Carpetas.leerJson(App.E.gestor, 'recurrentes.json'); } catch (e) { recurrentes = null; }
+    guias = guias || {};
+    var porTipo = (campos && campos.porTipo) || {};
+    var nombresReales = {};
+    App.E.tipos.forEach(function (t) { nombresReales[t.tipo] = true; });
+    var juntados = [];
+    for (var i = 0; i < App.E.tipos.length; i++) {
+      var t = App.E.tipos[i];
+      var otros = [t.nombreCorto].concat(t.alias || []).filter(function (x, k, arr) {
+        return x && x !== t.tipo && !nombresReales[x] && arr.indexOf(x) === k;
+      });
+      for (var j = 0; j < otros.length; j++) {
+        var viejo = otros[j];
+        var tiene = (guias[viejo] || []).length || (porTipo[viejo] || []).length ||
+          (Array.isArray(recurrentes) && recurrentes.some(function (x) { return x && x.tipo === viejo; }));
+        if (!tiene) continue;
+        var r = await mover(viejo, t.tipo);
+        if (hayAlgo(r)) juntados.push(t.tipo);
+      }
+    }
+    var quitadas = await quitarRepetidas();
+    return { juntados: juntados, repetidas: quitadas };
+  }
+
+  (function () {
+    var hecho = false;
+    function enganchar() {
+      if (!window.Gestor) return;
+      window.Gestor.alRefrescar.push(function () {
+        if (hecho || !window.Gestor.carpetaGestor() || !(App.E.tipos || []).length || !window.GuiasDelCentro) return;
+        hecho = true;
+        arreglar().then(function (r) {
+          if (r.juntados.length) {
+            U.aviso('He juntado con su tipo la guía de «' + r.juntados.join('», «') + '».', 'bueno');
+          }
+          if (r.repetidas) {
+            U.aviso('He quitado ' + (r.repetidas === 1 ? 'una plantilla repetida' : r.repetidas + ' plantillas repetidas') +
+              ' (están en la papelera).', 'bueno');
+          }
+        }, function (e) { U.accesorio('No he podido juntar la guía de un tipo con su nombre nuevo', e); });
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar);
+    else enganchar();
+  })();
+
+  return {
+    mover: mover, arreglar: arreglar, nombresDe: nombresDe, tipoPorNombre: tipoPorNombre,
+    hayAlgo: hayAlgo, textoDe: textoDe, repetidas: repetidas, quitarRepetidas: quitarRepetidas,
+    /* Fila 207 (docs/UNIR-DOS-TIPOS.md): js/tipos-unir.js reutiliza `n`
+       (la normalización de nombres) y `moverPlantillas`/`moverRecurrentes`
+       tal cual, sin cambiar lo que hacen para App.renombrarTipo. La guía
+       y los campos, al unir dos tipos, llevan su propia regla, distinta
+       de moverGuia/moverCampos de aquí arriba. */
+    n: n, moverPlantillas: moverPlantillas, moverRecurrentes: moverRecurrentes,
+    problemaDelCorto: problemaDelCorto, trozoDeCarpeta: trozoDeCarpeta
+  };
+})();
+window.TiposNombre = TiposNombre;
+
+/* ---------- cambiarle el nombre a un tipo de asunto ----------
+
+   Los asuntos ABIERTOS se renombran: son pocos y es el trabajo vivo.
+
+   El ARCHIVO no se toca. Renombrar allí obligaría a copiar y borrar
+   carpeta por carpeta, con Dropbox resincronizando de fondo, y el
+   nombre de una carpeta archivada es el rastro de lo que se hizo aquel
+   día. En su lugar, el nombre viejo se guarda como alias del tipo: las
+   carpetas antiguas se siguen reconociendo y se enseñan con el nombre
+   nuevo, sin mover un solo fichero. */
+async function unirDesdeCambioDeNombre(tipo, otro) {
+  var ok = await U.preguntar('Ya hay un tipo «' + otro.tipo + '»',
+    '<p>¿Quieres unir «' + U.escapar(tipo.tipo) + '» con «' + U.escapar(otro.tipo) + '»?</p><p>' + TiposUnir.textoResumen(tipo, otro) + '</p>',
+    'Unir con él');
+  if (!ok) return;
+  var resultado;
+  try { resultado = await TiposUnir.unir(tipo, otro); }
+  catch (e) { U.fallo('No se han podido unir', e); return; }
+  await TiposUnir.despuesDeUnir(tipo, otro);
+  TiposUnir.avisarUnidos(otro, resultado);
+}
+
+App.renombrarTipo = async function (tipo) {
+  /* Fila 606: un tipo con nombre corto enseña también su casilla (para cambiarlo o vaciarlo); sin él, el cuadro
+     queda como siempre. Si el corto no vale, el cuadro se vuelve a abrir con lo escrito y el motivo. */
+  var conCorto = !!tipo.nombreCorto;
+  var nombreNuevo, cortoNuevo = '', textoNombre = tipo.tipo, textoCorto = tipo.nombreCorto || '', motivo = '';
+  for (;;) {
+    var pregunta = U.preguntar('Cambiar el nombre del tipo',
+      '<label class="etiqueta">Nombre nuevo</label>' +
+      '<input id="tipo-nuevo-nombre" class="campo" value="' + U.escapar(textoNombre) + '">' +
+      (conCorto ?
+        '<label class="etiqueta" style="margin-top:10px">Nombre corto <span class="suave">(para el nombre de la carpeta)</span></label>' +
+        '<input id="tipo-nuevo-corto" class="campo" maxlength="25" placeholder="Igual que el nombre nuevo" value="' + U.escapar(textoCorto) + '">' +
+        '<div class="aviso-en-vivo" id="tipo-nuevo-corto-aviso"></div>' : '') +
+      (motivo ? '<p class="nota" id="tipo-nuevo-motivo" style="color:var(--malo,#b00020)">' + U.escapar(motivo) + '</p>' : '') +
+      '<p class="nota">Se cambiará en los asuntos abiertos que lo usen. ' +
+      'Las carpetas del archivo no se tocan: se seguirán llamando como se llaman, ' +
+      'y el buscador las encontrará igual.</p>', 'Cambiar');
+    if (conCorto) {
+      var campoCorto = $('tipo-nuevo-corto'), avisoCorto = $('tipo-nuevo-corto-aviso');
+      var pintar = function () {
+        var t = U.limpiarNombre(campoCorto.value).toUpperCase();
+        var problema = TiposNombre.problemaDelCorto(t, tipo);
+        avisoCorto.className = 'aviso-en-vivo' + (problema ? ' aviso-en-vivo-malo' : '');
+        avisoCorto.textContent = problema || (t ? t.length + ' de 25 caracteres' : '');
+      };
+      campoCorto.oninput = pintar;
+      pintar();
+    }
+    var ok = await pregunta;
+    if (!ok) return;
+    nombreNuevo = U.limpiarNombre($('tipo-nuevo-nombre').value).toUpperCase();
+    if (!conCorto) break;
+    cortoNuevo = U.limpiarNombre($('tipo-nuevo-corto').value).toUpperCase();
+    motivo = TiposNombre.problemaDelCorto(cortoNuevo, tipo);
+    if (!motivo) break;
+    textoNombre = $('tipo-nuevo-nombre').value; textoCorto = $('tipo-nuevo-corto').value;
+  }
+  if (cortoNuevo === nombreNuevo) cortoNuevo = '';   /* un corto igual al largo no aporta nada */
+  var cortoViejo = tipo.nombreCorto || '';
+  var cambiaLargo = !!nombreNuevo && nombreNuevo !== tipo.tipo;
+  var cambiaCorto = conCorto && cortoNuevo !== cortoViejo;
+  if (!nombreNuevo || (!cambiaLargo && !cambiaCorto)) return;
+
+  /* Fila 279: si ya hay un tipo con ese nombre (o es su nombre corto), se ofrece unirlos; si es un nombre antiguo
+     de otro o se parece, el cuadro común con «Unir con él» en cada fila. Sus propios nombres antiguos no preguntan. */
+  var parecidos = [];
+  if (cambiaLargo) {
+    var igual = TiposParecidos.paraNombreNuevo(nombreNuevo, tipo).filter(function (x) { return x.motivo === 'igual'; })[0];
+    if (igual) { await unirDesdeCambioDeNombre(tipo, igual.tipo); return; }
+    parecidos = await TiposParecidos.confirmarNombre(nombreNuevo, {
+      salvo: tipo, verbo: 'Vas a cambiarle el nombre a', boton: 'Unir con él', seguir: 'Cambiar el nombre de todas formas',
+      alPulsar: function (otro) { setTimeout(function () { unirDesdeCambioDeNombre(tipo, otro); }, 0); }
+    });
+    if (!parecidos) return;
+  }
+
+  var nombreViejo = tipo.tipo;
+  var afectadas = App.E.listaAbiertos.filter(function (a) {
+    return a.leido.reconocido && a.leido.tipo === nombreViejo;
+  });
+
+  /* Fila 606: lo que las carpetas llevan por el tipo es el nombre corto si lo hay, el largo si no, y lo que hay
+     que quitar es lo que la carpeta lleva DE VERDAD (el corto viejo, el largo viejo o un alias), no tantas letras
+     como tiene el largo. Antes, con nombre corto, la carpeta se recortaba mal. */
+  var paraCarpeta = (conCorto && cortoNuevo) ? cortoNuevo : nombreNuevo;
+  var candidatos = [cortoViejo, nombreViejo].concat(tipo.alias || []);
+
+  var cambiadas = 0, fallos = [];
+  for (var i = 0; i < afectadas.length; i++) {
+    var a = afectadas[i];
+    /* Fila 239: con número de asunto, el tipo va detrás de `AAMMDD A26-0137 `. */
+    var desde = a.leido.numero ? 7 + a.leido.numero.length + 1 : 7;
+    var quitar = TiposNombre.trozoDeCarpeta(a.nombre, desde, candidatos);
+    if (!quitar) { fallos.push(a.nombre + ': su carpeta no lleva el nombre del tipo donde se esperaba'); continue; }
+    var nombreCarpeta = a.nombre.slice(0, desde) + paraCarpeta + a.nombre.slice(desde + quitar.length);
+    if (nombreCarpeta === a.nombre) continue;
+    try {
+      /* Fila 303 (docs/CARPETAS-PERDIDAS-QUE-ESTAN-ARCHIVADAS.md, 7): la clave de la ficha no se toca si su carpeta
+         no existe con el nombre viejo. */
+      if (!(await Carpetas.existe(App.E.abiertos, a.nombre))) {
+        fallos.push(a.nombre + ': su carpeta ya no está con ese nombre');
+        continue;
+      }
+      await Carpetas.renombrar(App.E.abiertos, a.nombre, nombreCarpeta);
+      /* Fila 303: la ficha SE MUDA al nombre nuevo (con sus hitos y su presencia). Hasta aquí se copiaba con
+         `App.anotar` y la del nombre viejo se quedaba en asuntos.json: sin carpeta, era un asunto perdido, y si el
+         asunto se archivaba después, su carpeta del ARCHIVO llevaba el tipo con el nombre nuevo. */
+      if (App.E.registro.asuntos[a.nombre]) await AsuntoRenombrar.mover(a.nombre, nombreCarpeta, { tipo: nombreNuevo });
+      cambiadas++;
+    } catch (e) {
+      fallos.push(a.nombre + ': ' + U.mensajeDeError(e));
+    }
+  }
+
+  tipo.alias = tipo.alias || [];
+  if (cambiaLargo && tipo.alias.indexOf(nombreViejo) === -1) tipo.alias.push(nombreViejo);
+  /* Fila 606: el nombre corto viejo, si deja de usarse, pasa a alias para que se sigan reconociendo las carpetas
+     que lo llevan (las del archivo). */
+  if (conCorto) {
+    if (cambiaCorto && cortoViejo && cortoViejo !== nombreNuevo && cortoViejo !== cortoNuevo && tipo.alias.indexOf(cortoViejo) === -1) tipo.alias.push(cortoViejo);
+    if (cortoNuevo) tipo.nombreCorto = cortoNuevo; else delete tipo.nombreCorto;
+  }
+  tipo.tipo = nombreNuevo;
+
+  var llevado = null;
+  if (cambiaLargo) {
+    /* 20-sep-2026, fila 79, apartado 9: sin esto, App.fusionarConDisco
+       veía el nombre viejo como algo que el otro ordenador tiene de más
+       y lo devolvía a la vida como tipo fantasma en cuanto alguien
+       guardara cualquier otra cosa (mismo mecanismo de la fila 77). Se
+       revive el nombre nuevo por si alguna vez se borró él mismo: si no,
+       renombrar a un nombre que se borró en el pasado lo haría
+       desaparecer al guardar. */
+    await Borrados.marcar(App.E.gestor, 'tipos', nombreViejo);
+    await Borrados.revivir(App.E.gestor, 'tipos', nombreNuevo);
+    TiposParecidos.alCrearNombre(nombreNuevo, parecidos);   /* fila 279: sale del `alias` de quien lo llevaba */
+  }
+  await App.guardarTipos();
+  if (cambiaLargo) await TiposParecidos.apuntarParejas(nombreNuevo, parecidos);
+
+  /* Fila 126: la guía, los campos, las plantillas y los recurrentes se
+     van con el tipo. Lo principal (el nombre) ya está guardado: si esto
+     falla, ámbar. */
+  if (cambiaLargo) {
+    try { llevado = await TiposNombre.mover(nombreViejo, nombreNuevo); }
+    catch (e) { U.accesorio('Tipo renombrado, pero no he podido llevarle su guía, campos o plantillas', e); }
+  }
+
+  await App.verAbiertos();
+  App.pintarAjustes();
+  if (App.E.tipoAjustesActual === tipo && typeof App.pintarTipoDeAsunto === 'function') {
+    App.pintarTipoDeAsunto();
+  }
+
+  if (fallos.length) {
+    U.aviso('Cambiadas ' + cambiadas + ' carpetas. ' + fallos.length + ' no se han podido.', 'malo');
+  } else {
+    U.aviso((cambiaLargo ? 'Tipo renombrado' : 'Nombre corto cambiado') + '. Carpetas abiertas cambiadas: ' + cambiadas + '.' +
+      (llevado && TiposNombre.hayAlgo(llevado) ? ' ' + TiposNombre.textoDe(llevado) : ''), 'bueno');
+  }
+};
+

@@ -1,0 +1,68 @@
+/* ============================================================
+   notas.css — el aspecto del diario de cada asunto (js/notas.js).
+   ============================================================ */
+
+/* El recuadro para escribir, arriba del todo de la ventana. */
+.nota-nueva { margin-bottom: 16px; }
+.nota-nueva textarea {
+  font: inherit; font-size: 14px; resize: vertical; min-height: 68px;
+}
+.nota-botonera {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 8px; flex-wrap: wrap;
+}
+.nota-aviso { color: var(--tinta-suave); font-size: 12px; }
+
+/* Las notas ya escritas, la más reciente arriba. */
+.notas-lista {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 46vh; overflow-y: auto;
+}
+.nota-fila {
+  border: 1px solid var(--linea); border-left: 4px solid #c3d8ec;
+  border-radius: 8px; padding: 9px 13px; background: var(--papel);
+}
+.nota-cabeza {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--tinta-suave); margin-bottom: 3px;
+}
+.nota-quien { font-weight: 600; color: var(--azul); }
+.nota-texto { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+
+/* El botón de una nota que viene de un correo. El enlace de Gmail va
+   aquí, no escrito dentro del texto. */
+.nota-botones { margin-top: 8px; }
+.nota-boton {
+  display: inline-block; text-decoration: none; color: var(--azul);
+  border-color: #c3d8ec; font-size: 13px; padding: 5px 12px;
+}
+.nota-boton:hover { background: var(--azul-claro); }
+
+/* Fila 139: la nota escrita desde un hito lleva su etiqueta. */
+.nota-hito { font: inherit; font-size: 11px; font-weight: 600; margin-left: 8px; padding: 1px 8px;
+  border: 1px solid var(--linea); border-radius: 10px; background: var(--azul-claro); color: var(--azul); cursor: pointer; }
+.nota-hito:hover { border-color: var(--azul); }
+
+/* Fila 229: el registro del asunto. Lo que anota la aplicación sola, en gris y más pequeño;
+   el «⋮» solo en lo escrito a mano. */
+.registro-auto { border-left-color: var(--linea); background: none; padding: 5px 13px; }
+.registro-auto .nota-texto { font-size: 12px; color: var(--tinta-suave); }
+.registro-menu { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.registro-mas { font: inherit; font-size: 16px; line-height: 1; border: 0; background: none; cursor: pointer; padding: 0 6px; color: var(--tinta-suave); }
+.registro-mas:hover { color: var(--azul); }
+.registro-acciones { display: inline-flex; gap: 6px; }
+.registro-acciones .boton { font-size: 12px; padding: 2px 10px; }
+.registro-acciones.oculto { display: none; }
+.registro-edicion { width: 100%; }
+.hito-nota.registro-linea { border: 0; border-left: 4px solid #c3d8ec; border-radius: 8px; background: var(--fondo); padding: 6px 10px; }
+.hito-nota.registro-linea.registro-auto { border-left-color: var(--linea); background: none; padding-left: 10px; }
+.hito-nota.registro-linea .nota-texto { font-size: 13px; }
+
+/* Fila 290: las notas de los directivos. */
+.nota-directivo-sin-ver { background: #fff6dc; border-left: 4px solid #e0a800; }
+.nota-directivo-etiqueta { margin-left: 8px; padding: 0 6px; border-radius: 8px; background: #e0a800; color: #fff; font-size: 11px; }
+.nota-directivo-docs { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.nota-directivo-doc { display: inline-flex; gap: 6px; align-items: center; }
+.nota-directivo-error { color: #b3261e; }
+.marca-nota-directivo { margin-left: 6px; color: #b07f00; font-size: 13px; cursor: help; }
+.registro-del-asunto { flex: none; font-size: 11px; font-weight: 600; color: #5b4a1d; background: #f6ecd0; border-radius: 10px; padding: 0 7px; margin-left: 6px; white-space: nowrap; }

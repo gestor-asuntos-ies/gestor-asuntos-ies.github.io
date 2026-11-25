@@ -1,0 +1,27 @@
+/* Administraciones como tercero (fila 167): el árbol de departamentos
+   de la ficha, el desplegable del asunto nuevo y «Pasar a Administraciones». */
+.adm-clase { display: flex; gap: 16px; margin-bottom: 6px; }
+.adm-departamentos { margin-top: 12px; }
+.adm-arbol { list-style: none; margin: 4px 0 4px 0; padding-left: 0; }
+.adm-arbol .adm-arbol { padding-left: 18px; border-left: 2px solid var(--borde, #ddd); margin-left: 6px; }
+.adm-dep { padding: 3px 0; overflow-wrap: anywhere; }
+.adm-dep .enlace { margin-left: 6px; font-size: 0.9em; }
+.adm-departamento-nuevo { margin-top: 8px; max-width: 420px; }
+.adm-traer-lista { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.adm-traer-fila { display: grid; grid-template-columns: minmax(220px, 2fr) 150px minmax(160px, 1.5fr) 150px; gap: 6px; align-items: center; }
+.adm-traer-tipos { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+@media (max-width: 800px) { .adm-traer-fila { grid-template-columns: 1fr; } }
+
+/* Una Administración como responsable de un hito (fila 205): el buscador
+   del cuadro de la mesa y el de línea del editor de guías. */
+.ro-buscador .ro-buscar { width: 100%; margin-bottom: 8px; }
+.ro-buscador .ro-lista { max-height: 260px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.ro-buscador .personas-bloque-titulo { margin-top: 6px; }
+.ro-organismo { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px;
+  padding: 6px 10px; border: 1px solid var(--borde, #ddd); border-radius: 6px; background: transparent; cursor: pointer; }
+.ro-organismo:hover, .ro-organismo:focus-visible { border-color: var(--acento, #3b6ea5); }
+.ro-organismo.ro-marcado { border-color: var(--acento, #3b6ea5); background: rgba(59, 110, 165, 0.1); }
+.ro-pie { font-size: 0.85em; overflow-wrap: anywhere; }
+.ro-eleccion { margin-top: 10px; }
+.ro-botones { display: flex; gap: 8px; margin-top: 8px; }
+.ro-en-linea { margin: 8px 0; padding: 10px; border: 1px solid var(--borde, #ddd); border-radius: 6px; }

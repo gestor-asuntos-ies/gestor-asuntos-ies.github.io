@@ -1,0 +1,487 @@
+/* ============================================================
+   ajustes.css — los bloques plegables de la pantalla de Ajustes.
+
+   Antes todo salía desplegado, uno detrás de otro, y lo de más abajo
+   se acababa olvidando. Ahora se ven los ocho títulos de un vistazo y
+   cada uno se abre cuando hace falta.
+   ============================================================ */
+
+.bloque-ajustes {
+  border: 1px solid #dde3ea;
+  border-radius: 10px;
+  margin: 10px 0;
+  background: #fff;
+}
+
+/* El aviso discreto en el botón de Ajustes de la barra, cuando hay
+   fichas sin carpeta. */
+.punto-ambar {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ambar-linea); margin-left: 6px; vertical-align: middle;
+}
+
+.bloque-ajustes > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  border-radius: 10px;
+}
+
+/* La flecha de siempre, dibujada a mano para que gire al abrir. */
+.bloque-ajustes > summary::-webkit-details-marker { display: none; }
+.bloque-ajustes > summary::before {
+  content: '';
+  width: 8px; height: 8px;
+  border-right: 2px solid #5d6b7a;
+  border-bottom: 2px solid #5d6b7a;
+  transform: rotate(-45deg);
+  transition: transform .15s;
+  flex: none;
+  position: relative; top: -2px;
+}
+.bloque-ajustes[open] > summary::before { transform: rotate(45deg); top: -4px; }
+
+.bloque-ajustes > summary:hover { background: #f4f7fa; }
+
+.bloque-titulo { font-size: 15px; font-weight: 600; }
+.bloque-pie { font-size: 12px; color: #5d6b7a; }
+
+.bloque-cuerpo { padding: 0 16px 16px; border-top: 1px solid #eef1f5; }
+.bloque-cuerpo > *:first-child { margin-top: 14px; }
+
+@media (max-width: 900px) {
+  .bloque-ajustes > summary { padding: 12px; }
+  .bloque-pie { width: 100%; }
+}
+
+/* ============================================================
+   Ajustes ágiles (11-sep-2026): encontrar y crear tipos sin scroll.
+   docs/AJUSTES-AGIL.md
+   ============================================================ */
+
+/* Ajustes aprovecha el ancho: el título de la cabecera y el cuerpo de
+   los bloques terminan en el mismo borde, con el mismo relleno lateral
+   que usa `.bloque-ajustes > summary` y `.bloque-cuerpo`. */
+#pantalla-ajustes > .cabecera { padding: 0 16px; }
+#pantalla-ajustes .explica, #pantalla-tipo-asunto .explica { max-width: 90ch; }
+
+/* ============================================================
+   Las tres pestañas de Ajustes (17-sep-2026, fila 39,
+   docs/AJUSTES-POR-TIPO.md): Tipos de asunto · El centro ·
+   Mantenimiento. Mismo lenguaje visual que .pestana-categoria, un
+   escalón más arriba. La pestaña abierta se recuerda en localStorage,
+   igual que la categoría (App.cambiarPestanaAjustes).
+   ============================================================ */
+/* La cabecera de Ajustes es solo el título (index.html); estas
+   pestañas se quedan pegadas justo debajo de ella, encogida o no
+   —"--cabecera-fija-alto" la pone js/cabecera-fija.js al medirla—,
+   para que "Tipos de asunto · El centro · Mantenimiento" no se pierda
+   al bajar (docs/CABECERA-QUE-SE-QUEDA.md, tabla del punto 2). */
+.ajustes-barra {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 10px 16px 0; margin-bottom: 8px;
+  position: sticky; top: var(--cabecera-fija-alto, 0px); z-index: 19;
+  background: var(--fondo);
+}
+.pestanas-ajustes { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Fila 288: el buscador ocupa el ancho que quede libre, a la derecha de las pestañas. */
+.ajustes-buscar { flex: 1 1 220px; min-width: 180px; max-width: none; margin-left: auto; }
+.ajustes-resultados {
+  margin: 0 16px 10px; padding: 4px; max-width: 90ch;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 8px;
+  display: flex; flex-direction: column;
+}
+.ajustes-resultado {
+  font: inherit; text-align: left; background: none; border: 0; border-radius: 6px;
+  padding: 7px 10px; cursor: pointer; color: var(--tinta);
+}
+.ajustes-resultado:hover, .ajustes-resultado:focus-visible { background: var(--fondo); }
+.ajustes-linea { margin: 0 16px 14px; color: var(--tinta-suave); }
+.ajustes-titulo-tipos { margin: 6px 0 8px; font-size: 18px; }
+.ajustes-tipos { margin-bottom: 14px; }
+.problemas-punto {
+  display: inline-block; width: 9px; height: 9px; margin-left: 7px; border-radius: 50%;
+  background: #e8a317; vertical-align: middle;
+}
+.problemas-punto.oculto { display: none; }
+.ajustes-montaje { display: none; }
+details.bloque-ajustes.destello > summary { animation: destelloBloque 1.5s ease-out; }
+@keyframes destelloBloque { from { background: #fff1a8; } to { background: transparent; } }
+.herramientas-puesta { margin-top: 26px; }
+.herramientas-puesta-titulo { margin: 0 0 4px; font-size: 18px; }
+.pestana-ajustes {
+  font: inherit; font-size: 14px; font-weight: 600;
+  background: var(--papel); color: var(--tinta-suave);
+  border: 1px solid var(--linea); border-radius: 20px;
+  padding: 8px 18px; cursor: pointer;
+}
+.pestana-ajustes:hover { border-color: #b9c6d6; color: var(--tinta); }
+.pestana-ajustes.activa { background: var(--azul); border-color: var(--azul); color: #fff; }
+
+.ajustes-tab { padding: 0 16px; }
+
+/* ============================================================
+   La pantalla propia de un tipo de asunto: dos columnas densas, una
+   sola por debajo de 1000px. Cada sección es un bloque igual que los
+   de Ajustes (mismo borde, mismo título), pero siempre desplegado:
+   nada que abrir ni cerrar, las siete se ven de una vez.
+   ============================================================ */
+#pantalla-tipo-asunto > .cabecera { padding: 0 16px; align-items: baseline; }
+
+.tipo-asunto-columnas {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 0 16px 40px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .tipo-asunto-columnas { grid-template-columns: 1fr; }
+}
+.tipo-asunto-columna { display: flex; flex-direction: column; gap: 16px; }
+
+/* Fila 198, apartado 1: la lista de comprobación de arriba de la
+   pantalla del tipo. Cada línea es un botón (abre y despliega la
+   sección que toca); si todo está marcado, `js/ajustes-tipo-
+   comprobacion.js` la sustituye por la línea verde `.aviso-bueno`. */
+#tipo-asunto-comprobacion { padding: 0 16px; margin-bottom: 4px; }
+#tipo-asunto-comprobacion:empty { display: none; }
+.tipo-comprobacion {
+  border: 1px solid #dde3ea; border-radius: 10px; background: #fff;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tipo-comprobacion-fila {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font: inherit; font-size: 13px; text-align: left; background: none; border: 0;
+  border-bottom: 1px solid #eef1f5; padding: 8px 14px; cursor: pointer; color: var(--tinta, #1b2733);
+}
+.tipo-comprobacion-fila:last-child { border-bottom: 0; }
+.tipo-comprobacion-fila:hover { background: #f4f7fa; }
+.tipo-comprobacion-marca { font-weight: 700; width: 16px; text-align: center; color: #8a6100; }
+.tipo-comprobacion-hecha .tipo-comprobacion-marca { color: #1e7a46; }
+.tipo-comprobacion-hecha .tipo-comprobacion-texto { color: var(--tinta-suave, #5d6b7a); }
+
+.tipo-asunto-seccion {
+  border: 1px solid #dde3ea; border-radius: 10px; background: #fff;
+  padding: 14px 16px;
+}
+.tipo-asunto-seccion h3 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 600;
+}
+.tipo-asunto-seccion .bloque-pie { display: block; margin-bottom: 10px; }
+.tipo-asunto-seccion .explica { margin-bottom: 10px; }
+
+/* El aviso ámbar de "también se usa en otros tipos" (Campos.
+   tiposQueUsanPropio / tiposQueUsanCalculado), dentro de la sección
+   Campos. */
+.aviso-compartido {
+  font-size: 12px; color: #8a6100; margin-top: 2px;
+}
+
+/* ---------- el panel de "+ Añadir campo" (fila 56, 18-sep-2026,
+   docs/CAMPOS-CATALOGO-Y-CALCULADOS.md), js/campos-catalogo.js y
+   js/campos-calculados-editor.js ---------- */
+/* Fila 254 (docs/CAMPOS-ARREGLO-Y-VENTANA-ANCHA.md): una línea por campo,
+   en columnas; los nombres largos se cortan con puntos suspensivos (el
+   nombre entero, en el `title`). En «Míos» y «Calculados», cada fila lleva
+   además sus botones, así que las columnas son algo más anchas y la fila
+   puede partirse. */
+.campos-catalogo-franja {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px;
+}
+.campos-catalogo-buscar-hueco { flex: 1 1 220px; min-width: 160px; }
+.campos-catalogo-buscar-hueco .campo { margin: 0; width: 100%; }
+.campos-catalogo-volver { margin-left: auto; }
+.campos-catalogo-rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.campos-catalogo-rejilla .fila-tipo { flex-wrap: nowrap; gap: 8px; padding: 6px 10px; min-width: 0; }
+.campos-catalogo-rejilla .nombre-tipo {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.campos-catalogo-rejilla-ancha { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+#campos-calc-lista.campos-catalogo-rejilla-ancha { grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); }
+.campos-catalogo-rejilla-ancha .fila-tipo .boton { padding: 3px 8px; font-size: 12px; flex: none; }
+.campos-catalogo-rejilla-ancha .nombre-tipo { flex: 1 1 auto; min-width: 60px; }
+.campos-catalogo-rejilla-ancha .suave { flex: 0 1 90px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campos-catalogo-rejilla .suave { font-size: 12px; }
+/* Fila 276: el motivo de un botón apagado («ya está en este asunto») se lee entero, sin puntos suspensivos. */
+/* Va en su propia línea, debajo del nombre y los botones. */
+.campos-catalogo-rejilla .fila-tipo:has(.campo-motivo) { flex-wrap: wrap; }
+.campos-catalogo-rejilla-ancha .suave.campo-motivo { order: 5; flex: 1 0 100%; white-space: normal; overflow: visible; text-overflow: clip; }
+@media (max-width: 700px) {
+  .campos-catalogo-rejilla, .campos-catalogo-rejilla-ancha { grid-template-columns: 1fr; }
+}
+#campos-propio-nuevo, #campos-calc-editor { max-width: 700px; }
+.campos-propio-form, .campos-calc-form {
+  margin: 8px 0; padding: 10px 12px;
+  border: 1px solid #d7dee6; border-radius: 8px; background: #f7f9fb;
+}
+.campos-calc-categorias {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 8px;
+}
+
+/* ---------- el aviso en vivo, al escribir un nombre nuevo ---------- */
+.aviso-en-vivo {
+  font-size: 13px;
+  margin: -4px 0 12px;
+  min-height: 18px;
+}
+.aviso-en-vivo:empty { margin: 0; min-height: 0; }
+.aviso-en-vivo-malo { color: var(--rojo-linea); font-weight: 600; }
+.aviso-en-vivo-ambar { color: #8a6100; font-weight: 600; }
+.aviso-en-vivo-bueno { color: #1b6b2f; font-weight: 600; }
+.tipo-largo-fila { margin: 10px 0; }
+.tipo-largo-hecho { opacity: .6; }
+.aviso-en-vivo .enlace { font-size: inherit; font-weight: 600; margin-left: 4px; }
+
+/* ---------- pestañas de categoría + buscador ---------- */
+.tipos-cabecera {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.pestanas-categoria { display: flex; flex-wrap: wrap; gap: 6px; }
+.pestanas-categoria.apagadas { opacity: .4; pointer-events: none; }
+.pestana-categoria {
+  font: inherit; font-size: 13px; font-weight: 600;
+  background: var(--papel); color: var(--tinta-suave);
+  border: 1px solid var(--linea); border-radius: 20px;
+  padding: 7px 14px; cursor: pointer; display: flex; align-items: center; gap: 7px;
+}
+.pestana-categoria:hover { border-color: #b9c6d6; color: var(--tinta); }
+.pestana-categoria.activa {
+  background: var(--azul); border-color: var(--azul); color: #fff;
+}
+.pestana-cuenta {
+  background: #eef1f5; color: var(--tinta); border-radius: 20px;
+  padding: 1px 8px; font-size: 11.5px; font-weight: 700;
+}
+.pestana-categoria.activa .pestana-cuenta { background: rgba(255,255,255,.25); color: #fff; }
+
+.buscar-tipos { flex: 1 1 260px; max-width: 340px; }
+/* Fila 250: el botón «Ninguno es el que busco: crear…», al final de la lista. */
+.crear-o-buscar-zona { margin: 12px 0; }
+
+.tipos-buscando-info { margin: -4px 0 10px; font-size: 13px; }
+
+/* ---------- la rejilla de tarjetas: tipos, estados y tipos de documento ---------- */
+.rejilla-tipos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+.rejilla-tipos > .vacio { grid-column: 1 / -1; }
+
+.tarjeta-tipo {
+  position: relative;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 8px;
+  padding: 9px 40px 9px 14px;
+  min-height: 64px;
+  display: flex; flex-direction: column; justify-content: center; gap: 5px;
+}
+.tarjeta-tipo-linea {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+/* La tarjeta de un tipo de asunto se pulsa entera para abrir su
+   pantalla (17-sep-2026, fila 39): solo esta lleva el cursor de mano y
+   un resalte de foco, para no confundirla con las de estados o tipos
+   de documento, que no abren nada al pulsarlas. */
+.tarjeta-tipo-pulsable { cursor: pointer; }
+.tarjeta-tipo-pulsable:hover { border-color: #b9c6d6; }
+.tarjeta-tipo-pulsable:focus-visible { outline: 2px solid var(--azul); outline-offset: 1px; }
+.tarjeta-tipo-nombre { font-weight: 600; }
+.tarjeta-tipo-antes { font-size: 12px; }
+.tarjeta-tipo-sub { font-size: 12px; }
+.tarjeta-tipo .plazo-tipo { display: flex; align-items: center; gap: 6px; }
+.tarjeta-tipo .campo-plazo { width: 62px; }
+
+/* Se destella un instante al llegar desde "Verlo", en el aviso de
+   duplicado: así se ve cuál es, sin tener que buscarla en la rejilla. */
+.tarjeta-tipo.destello { animation: destelloTipo 1s ease-out; }
+@keyframes destelloTipo {
+  0% { background: var(--ambar); border-color: var(--ambar-linea); }
+  100% { background: var(--papel); border-color: var(--linea); }
+}
+
+/* ---------- el menú de los tres puntos ---------- */
+.tarjeta-tipo-menu-envoltorio { position: absolute; top: 6px; right: 4px; }
+.tarjeta-tipo-menu-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; line-height: 1; background: transparent; border: 0; border-radius: 6px;
+  color: var(--tinta-suave); cursor: pointer;
+}
+.tarjeta-tipo-menu-btn:hover { background: #eef1f5; color: var(--tinta); }
+.tarjeta-tipo-menu {
+  position: absolute; top: 30px; right: 0; z-index: 8;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 8px;
+  box-shadow: var(--sombra); min-width: 168px; padding: 4px;
+  display: flex; flex-direction: column;
+}
+.tarjeta-tipo-menu button {
+  font: inherit; font-size: 13.5px; text-align: left; background: none; border: 0;
+  border-radius: 6px; padding: 8px 10px; cursor: pointer; color: var(--tinta);
+}
+.tarjeta-tipo-menu button:hover { background: #f0f3f7; }
+.tarjeta-tipo-menu button.boton-peligro { color: var(--rojo-linea); }
+
+@media (max-width: 900px) {
+  .tipos-cabecera { flex-direction: column; align-items: stretch; }
+  .buscar-tipos { max-width: none; }
+}
+
+/* ---------- el cuadro de "Insertar hueco" ----------
+
+   17-sep-2026, docs/HUECOS-INSERTAR.md. Sustituye al muro de más de
+   treinta botones que se pintaba encima del texto de una plantilla.
+   Va colgado del <body>, con position:fixed, por encima de la capa
+   del cuadro de la plantilla (z-index 50) y por debajo de los
+   mensajes de abajo a la derecha (60). Quien lo pinta:
+   js/huecos-buscador.js. */
+.boton-hueco { padding: 5px 10px; font-size: 13px; }
+
+.etiqueta-con-boton {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.etiqueta-con-boton .etiqueta { margin-bottom: 0; }
+
+.huecos-cuadro {
+  position: fixed; z-index: 55;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(10,25,45,.25);
+  padding: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.huecos-cuadro .huecos-buscar { width: 100%; }
+
+.huecos-lista {
+  max-height: 260px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.huecos-opcion {
+  font: inherit; text-align: left; background: none; border: 0;
+  border-radius: 6px; padding: 6px 8px; cursor: pointer; color: var(--tinta);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.huecos-opcion:hover { background: #f0f3f7; }
+.huecos-opcion.elegido { background: var(--azul-claro); }
+/* Fila 144: los huecos del alumnado de la base de datos, agrupados por apartado. */
+.huecos-grupo { font-size: 11px; font-weight: 700; color: var(--tinta-suave); padding: 8px 10px 2px; text-transform: uppercase; }
+.huecos-nombre { font-size: 14px; }
+.huecos-codigo { font-size: 12px; color: var(--tinta-suave); font-family: ui-monospace, Consolas, monospace; }
+
+.huecos-vacio { padding: 10px 8px; color: var(--tinta-suave); font-size: 13.5px; }
+.huecos-pie { margin: 0; padding: 0 4px 2px; font-size: 12px; color: var(--tinta-suave); }
+
+/* ============================================================
+   Ajustes plegado (24-sep-2026, fila 105, docs/AJUSTES-PLEGADO.md):
+   todo nace plegado y el título dice lo que hay dentro. El resumen va
+   justo detrás del nombre; en ámbar si dentro hay un aviso.
+   ============================================================ */
+.bloque-resumen {
+  font-size: 13px; font-weight: 600; color: var(--tinta-suave, #44505c);
+  background: #eef2f6; border-radius: 10px; padding: 1px 9px;
+}
+.bloque-resumen-ambar {
+  color: #8a5a00; background: var(--ambar-fondo, #fff4d6);
+  border: 1px solid var(--ambar-linea, #e6b949);
+}
+/* Un aviso de fallo de Mantenimiento: arriba, desplegado y en ámbar. */
+.bloque-ajustes.bloque-con-fallo { border-color: var(--ambar-linea, #e6b949); background: #fffaf0; }
+
+/* La pantalla de un tipo: sus ocho secciones son ya bloques plegables,
+   así que pierden el relleno propio de cuando iban siempre abiertas. */
+details.tipo-asunto-seccion { padding: 0; margin: 0; }
+details.tipo-asunto-seccion .bloque-pie { display: inline; margin-bottom: 0; }
+/* "Herramientas" lleva dentro otros bloques plegables. */
+#herramientas-cuerpo > .bloque-ajustes { margin: 8px 0; }
+/* Fila 146: las casillas de un impreso oficial (js/formularios-ajustes.js). */
+.impreso-casilla { align-items: center; gap: 10px; }
+.impreso-casilla-nombre { flex: 1; min-width: 0; }
+.impreso-mini { flex: 0 0 auto; width: 56px; min-height: 20px; cursor: zoom-in; }
+.impreso-mini canvas { width: 100%; height: auto; border: 1px solid var(--linea); border-radius: 3px; display: block; }
+.impreso-mini.grande { width: min(600px, 90%); cursor: zoom-out; }
+.impreso-casilla:has(.impreso-mini.grande) { flex-wrap: wrap; }
+.impreso-grupo { margin-top: 8px; }
+.impreso-grupo > summary { cursor: pointer; font-size: 13px; color: var(--tinta-suave); }
+
+/* «Al cerrar el asunto, avisar a quien lo pide» (27-sep-2026, fila 195). */
+.tipo-avisar-lopide-cierre-plantilla { margin-top: 6px; }
+
+/* Fila 255: «Ya están en este asunto», arriba de la lista de campos cuando se abre desde un hito. */
+.campos-catalogo-grupo { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--linea); }
+.campos-catalogo-grupo .etiqueta { margin: 0 0 6px; }
+
+/* Fila 291: la tarjeta de cada problema, siempre abierta y a todo el ancho. */
+.problema {
+  margin: 0 16px 14px; padding: 14px 16px; max-width: 90ch;
+  background: var(--papel); border: 1px solid var(--linea); border-left: 4px solid #e8a317; border-radius: 8px;
+}
+.problema-roja { border-left-color: #c0392b; }
+.problema-titulo { margin: 0 0 8px; font-size: 17px; }
+.problema-linea { margin: 0 0 6px; }
+.problema-hacer-rotulo { margin-top: 10px; }
+.problema-quien { margin: 0 0 6px; font-weight: 600; }
+.problema-pasos { margin: 0 0 8px; padding-left: 22px; }
+.problema-pasos li { margin-bottom: 4px; }
+.problema-antes { margin: 0 0 6px; color: var(--tinta-suave); }
+.problema-acciones { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.problema-accion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.problema-explica { flex: 1 1 260px; }
+.problema-lista { list-style: none; margin: 6px 0 0; padding: 0; }
+.problema-elemento { padding: 10px 0; border-top: 1px solid var(--linea); }
+.problema-elemento-cab { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 4px; }
+.problema-nombre { font-weight: 600; overflow-wrap: anywhere; }
+.problema-todos { display: block; margin: 6px 0; }
+.problema-detalle { margin-top: 10px; }
+.problema-detalle pre { white-space: pre-wrap; font-size: 12px; margin: 6px 0 0; }
+.problema-cambia { margin: 4px 0 8px; }
+.problema-cambia summary { cursor: pointer; font-weight: 600; }
+.problema-cambia-lista { margin: 4px 0 0; padding-left: 20px; }
+.huerfana-opcion { cursor: pointer; overflow-wrap: anywhere; }
+/* Fila 303: el bloque «La app ha encontrado la carpeta de N de ellos» y el cuadro de «Buscar su carpeta». */
+.problema-bloque { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 6px; }
+.problema-bloque-titulo { margin: 0 0 6px; }
+.problema-bloque-lista { list-style: none; margin: 0 0 10px; padding: 0; }
+.problema-bloque-fila { padding: 8px 0; border-top: 1px solid var(--linea); }
+.problema-bloque-nombre { cursor: pointer; overflow-wrap: anywhere; }
+.problema-bloque-carpeta { margin: 2px 0 0 22px; overflow-wrap: anywhere; }
+.problema-bloque-fila .suave, .problema-bloque-aviso { margin-left: 22px; }
+.problema-bloque-aviso { color: var(--tinta-suave); }
+.problema-bloque-progreso { display: block; width: 100%; margin-top: 8px; }
+#huerfana-buscar { width: 100%; margin: 8px 0; box-sizing: border-box; }
+#huerfana-destino { max-height: 46vh; overflow: auto; }
+#huerfana-union { margin: 8px 0 0; font-weight: 600; }
+
+
+/* Fila 422 (docs/DESACTIVAR-UN-TIPO.md): un tipo desactivado, en gris y con su marca. */
+.tarjeta-tipo-desactivado { opacity: 0.6; background: #f1f3f5; }
+.tarjeta-tipo-desactivado .tarjeta-tipo-nombre { color: #5f6b7a; }
+.marca-desactivado {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  color: #5f6b7a; background: #dfe3e8; border-radius: 4px; padding: 1px 6px;
+}
+.tipo-marca-desactivado { font-weight: 600; }
+
+/* Fila 510: el recuadro «Insertar» (Campo variable, Texto condicional) y el cuadro «Texto condicional». */
+.insertar-caja {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0; min-width: 0;
+  border: 1px solid var(--azul, #1f4e79); background: var(--azul-claro, #e8f0f8); border-radius: 10px; padding: 2px 10px 8px;
+}
+.insertar-caja legend {
+  font-size: 12px; font-weight: 700; color: var(--azul, #1f4e79); text-transform: uppercase; letter-spacing: .06em; padding: 0 4px;
+}
+.insertar-caja .boton { border-color: var(--azul, #1f4e79); color: var(--azul, #1f4e79); font-weight: 600; background: var(--papel, #fff); }
+.texto-cond-cuadro { z-index: 56; gap: 10px; padding: 12px; }
+.texto-cond-cuadro .texto-cond-fila .etiqueta { display: block; margin: 0 0 4px; }
+.texto-cond-cuadro select { width: 100%; }
+.texto-cond-botones { display: flex; gap: 8px; justify-content: flex-end; }
+.texto-cond-aviso:empty { display: none; }
+
+/* Fila 698: la ventana «Recorrido» de un tipo de documento. */
+.rt-opcion { display: inline-block; margin: 2px 14px 2px 0; }
+.rt-vista { margin-top: 12px; }

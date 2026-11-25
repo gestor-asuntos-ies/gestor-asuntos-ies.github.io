@@ -1,0 +1,402 @@
+/* ============================================================
+   relacionados.js — terceros relacionados con un asunto.
+
+   Un asunto puede tener, además de su tercero principal, una lista de
+   "relacionados": otras personas o entidades a las que también les
+   afecta, aunque la carpeta del asunto no sea suya. Por ejemplo, un
+   expediente disciplinario de un alumno donde también está implicado
+   otro alumno.
+
+   Cuando el asunto se archiva, cada relacionado se queda con una NOTA
+   en su propia carpeta del archivo, diciendo dónde está el asunto de
+   verdad. Esa nota es un fichero de texto que escribe la aplicación:
+   NUNCA se copia ningún documento del asunto. Al reabrir el asunto,
+   esa nota se borra sola; si alguien ha metido algo más dentro de esa
+   carpeta-nota, no se toca, y se avisa.
+
+   La lista de relacionados se guarda en la propia ficha del asunto,
+   en asuntos.json, igual que cualquier otro dato: `ficha.relacionados`,
+   una lista de { categoria, nombre }. Los asuntos de antes de esta
+   función simplemente no tienen ese campo, y no hace falta migrar nada.
+
+   Este fichero no pinta nada por su cuenta en la tarjeta de la lista:
+   solo vive dentro de la ficha del asunto (js/ficha-asunto.js) y en la
+   ficha de la persona (js/archivo-personas.js), a los que se engancha
+   envolviendo sus funciones, como ya hace el resto de la aplicación.
+   ============================================================ */
+var Relacionados = (function () {
+
+  /* Fila 133 (docs/PARTIR-FICHEROS-GRANDES.md): partido por temas, sin
+     cambiar nada de lo que hace. Aquí, elegir y añadir relacionados; el
+     bloque de la ficha y copiar el nombre, en js/relacionados-ficha.js;
+     archivar (notas y marcadores), dónde es relacionado alguien y los
+     enganches a archivar, reabrir, el ARCHIVO y la ficha de la persona,
+     en js/relacionados-archivar.js. Los dos se cuelgan de `Relacionados`. */
+
+  function $(id) { return document.getElementById(id); }
+
+  var NOMBRE_FICHERO_MARCADOR = 'DONDE ESTA ESTE ASUNTO.txt';
+
+  function nombreCarpetaMarcador(nombreAsunto) {
+    return '(RELACIONADO) ' + nombreAsunto;
+  }
+
+  /* ==========================================================
+     ELEGIR UN TERCERO
+
+     Reutiliza el mismo buscador de "Nuevo asunto"
+     (App.pintarBuscadorDeTercero, en js/asuntos-nuevo.js), montado
+     dentro del cuadro de siempre (#capa). Si el usuario pide dar de
+     alta uno nuevo, este cuadro se cierra primero y se abre el de
+     alta (App.cuadroDeTercero) por su cuenta: nunca los dos a la vez.
+
+     Devuelve la persona normalizada (como las que da Datos.buscar), o
+     null si se cancela.
+     ========================================================== */
+
+  /* Fila 562: `escrito` (opcional) es lo que se había escrito en el correo. Una dirección de correo va a la casilla de correo del
+     alta; un nombre sale ya escrito en el buscador. */
+  function elegirTercero(titulo, escrito) {
+    var direccion = '', nombreEscrito = '';
+    var txt = String(escrito || '').trim();
+    if (txt) {
+      var m = txt.match(Destinatarios.RE_CORREO);
+      if (m && m.length === 1 && m[0] === txt) direccion = txt; else if (!m) nombreEscrito = txt;
+    }
+    return new Promise(function (resolver) {
+      var resuelto = false;
+      function resolverUnaVez(v) {
+        if (resuelto) return;
+        resuelto = true;
+        resolver(v);
+      }
+
+      var capa = $('capa');
+      $('cuadro-titulo').textContent = titulo;
+      var cuerpo = $('cuadro-cuerpo');
+      cuerpo.innerHTML = '<div id="rel-picker"></div>';
+      $('cuadro-aceptar').classList.add('oculto');
+      capa.classList.remove('oculto');
+
+      function cerrarCapa() {
+        capa.classList.add('oculto');
+        $('cuadro-aceptar').classList.remove('oculto');
+        $('cuadro-cancelar').onclick = null;
+      }
+      $('cuadro-cancelar').onclick = function () {
+        cerrarCapa();
+        resolverUnaVez(null);
+      };
+
+      App.pintarBuscadorDeTercero($('rel-picker'), null, async function (categoria, persona, texto) {
+        if (persona) {
+          cerrarCapa();
+          resolverUnaVez(persona);
+          return;
+        }
+        /* Dar de alta uno nuevo: se cierra este cuadro y se abre el de
+           siempre, en secuencia, no anidado. */
+        cerrarCapa();
+        var def = Datos.LISTAS[categoria];
+        if (!def) { resolverUnaVez(null); return; }
+        var deEntrada = {};
+        deEntrada[def.cabecera[0]] = texto || '';
+        if (direccion) {
+          var colCorreo = def.cabecera.filter(function (c) { return /correo|e-?mail/i.test(c); })[0];
+          if (colCorreo) deEntrada[colCorreo] = direccion;
+        }
+        var tituloAlta = categoria === 'ALUMNADO'
+          ? 'Dar de alta un solicitante' : 'Dar de alta en ' + categoria;
+        var valores = await App.cuadroDeTercero(categoria, deEntrada, tituloAlta);
+        if (!valores) { resolverUnaVez(null); return; }
+        try {
+          var fuente = await Datos.anadirALista(App.E.datos, categoria, valores);
+          var encontrados = Datos.buscar(fuente.lista, valores[def.cabecera[0]], 1);
+          resolverUnaVez(encontrados[0] || null);
+        } catch (e) {
+          U.aviso('No he podido darlo de alta: ' + U.mensajeDeError(e), 'malo');
+          resolverUnaVez(null);
+        }
+      }, nombreEscrito ? { textoInicial: nombreEscrito } : undefined);
+    });
+  }
+
+  /* ==========================================================
+     AÑADIR UN RELACIONADO A LA FICHA
+     ========================================================== */
+
+  /* No deja añadir al propio tercero del asunto, y reutiliza
+     U.dejaCrear (el mismo aviso de "¿es otro de verdad?" que usan los
+     tipos, los estados...) para no repetir al mismo, ni con un nombre
+     casi igual, dos veces. */
+  async function validarYAgregar(a, categoria, nombre) {
+    var categoriaPrincipal = (a.ficha && a.ficha.categoria) || (a.leido && a.leido.categoria) || '';
+    var terceroPrincipal = (a.ficha && a.ficha.tercero) || '';
+
+    if (categoria === categoriaPrincipal && terceroPrincipal &&
+        U.normalizar(nombre) === U.normalizar(terceroPrincipal)) {
+      U.aviso('Ese es el propio tercero del asunto: no hace falta relacionarlo consigo mismo.', 'malo');
+      return false;
+    }
+
+    var actuales = ((a.ficha && a.ficha.relacionados) || []).filter(function (r) {
+      return r.categoria === categoria;
+    });
+    var deja = await U.dejaCrear(nombre, actuales.map(function (r) { return r.nombre; }), 'relacionado');
+    if (!deja) return false;
+
+    /* Fila 176, punto 1: se funde con el disco, releído dentro de la
+       cola, en vez de mandar la lista entera calculada en memoria. */
+    try {
+      await App.anotarLista(a.nombre, 'relacionados', { anadir: [{ categoria: categoria, nombre: nombre }] });
+    } catch (e) {
+      U.aviso('No he podido guardarlo: ' + U.mensajeDeError(e), 'malo');
+      return false;
+    }
+    U.aviso('Relacionado añadido.', 'bueno');
+    return true;
+  }
+
+  async function agregarRelacionado(a, escrito) {
+    var p = await elegirTercero('Añadir un relacionado', escrito);
+    if (!p) return false;
+    var nombre = App.textoTercero(p);
+    return validarYAgregar(a, p.categoria, nombre);
+  }
+
+  /* ==========================================================
+     AÑADIR VARIOS A LA VEZ (17-sep-2026, fila 21,
+     docs/GRUPOS-DE-PERSONAS.md)
+
+     A diferencia de `validarYAgregar`, aquí no se pregunta uno a uno
+     ("¿es otro de verdad?"): con veinte señalados sería veinte
+     cuadros. Solo se descartan, en silencio, el propio tercero del
+     asunto y los que ya estuvieran exactamente en la lista; el resto
+     entra. Sin efectos: se puede probar sola. */
+  function combinarRelacionados(actuales, categoriaPrincipal, terceroPrincipal, candidatos) {
+    var finales = actuales.slice();
+    var nuevos = [];
+    var anadidos = 0, yaEstaban = 0, esPropio = 0;
+    candidatos.forEach(function (c) {
+      if (c.categoria === categoriaPrincipal && terceroPrincipal &&
+          U.normalizar(c.nombre) === U.normalizar(terceroPrincipal)) { esPropio++; return; }
+      var repetido = finales.some(function (r) {
+        return r.categoria === c.categoria && U.normalizar(r.nombre) === U.normalizar(c.nombre);
+      });
+      if (repetido) { yaEstaban++; return; }
+      var nuevo = { categoria: c.categoria, nombre: c.nombre };
+      finales.push(nuevo);
+      nuevos.push(nuevo);
+      anadidos++;
+    });
+    /* 'nuevos' (fila 176): solo los que de verdad se añaden, para que
+       agregarVarios los funda con App.anotarLista sin repetir el
+       cálculo de 'finales' contra el disco. */
+    return { finales: finales, nuevos: nuevos, anadidos: anadidos, yaEstaban: yaEstaban, esPropio: esPropio };
+  }
+
+  /* El cuadro de "Añadir varios": el buscador en modo de señalar
+     varios (App.pintarBuscadorDeTercero, opciones.multiple), con los
+     atajos de alumnado y "Meter un grupo entero" encima. Devuelve la
+     lista de señalados ({categoria, nombre, persona}), o null si se
+     cancela. */
+  function abrirAnadirRelacionados(opc) {
+    opc = opc || {};   /* fila 293: titulo, marcadosIniciales, textoBoton, minimo y alSenalar(tipo, valor, lista) */
+    return new Promise(function (resolver) {
+      var resuelto = false;
+      function resolverUnaVez(v) { if (resuelto) return; resuelto = true; resolver(v); }
+
+      var capa = $('capa');
+      $('cuadro-titulo').textContent = opc.titulo || 'Añadir varios relacionados';
+      var cuerpo = $('cuadro-cuerpo');
+      /* Fila 338, de arriba abajo: pestañas y buscador, los atajos de alumnado (solo con Alumnado), «Meter un
+         grupo entero» y «Pegar una lista». Lo señalado, «Cancelar» y el botón principal, en un pie fijo. */
+      cuerpo.innerHTML =
+        '<div id="rel-picker"></div>' +
+        '<div id="rel-atajos" class="oculto"></div>' +
+        '<div id="rel-grupo-fila"></div>' +
+        '<div id="rel-pegar-fuera"></div>';
+      $('cuadro-aceptar').classList.add('oculto');
+      var sitioBarra = VariosCuadro.abrir();
+      capa.classList.remove('oculto');
+
+      function cerrarCapa() {
+        VariosCuadro.cerrar();
+        capa.classList.add('oculto');
+        $('cuadro-aceptar').classList.remove('oculto');
+        $('cuadro-cancelar').onclick = null;
+      }
+      var api = null;
+      $('cuadro-cancelar').onclick = VariosCuadro.cancelarCon({
+        marcados: function () { return api ? api.marcados() : []; }, iniciales: opc.marcadosIniciales,
+        salir: function () { cerrarCapa(); resolverUnaVez(null); }
+      });
+
+      api = App.pintarBuscadorDeTercero($('rel-picker'), null, function (marcados) {
+        cerrarCapa();
+        resolverUnaVez(marcados);
+      }, {
+        multiple: true, alSenalar: opc.alSenalar,   /* fila 296: «Pegar una lista» */
+        marcadosIniciales: opc.marcadosIniciales, minimo: opc.minimo,
+        textoBoton: opc.textoBoton || textoBotonDelAsunto,
+        sitioBarra: sitioBarra, sitioPegar: $('rel-pegar-fuera'),
+        alCambiarCategoria: function (categoria) { pintarAtajosDeAlumnado(categoria, api, opc.alSenalar); }
+      });
+
+      pintarGrupoFila(api, opc.alSenalar);
+    });
+  }
+
+  /* El botón principal del cuadro cuando se añade a un asunto (fila 338). */
+  function textoBotonDelAsunto(n) { return n === 1 ? 'Añadir al asunto 1' : 'Añadir al asunto los ' + n; }
+
+  /* Fila 345: con ALUMNADO elegido, la zona «Filtrar el alumnado» de js/repartir-filtro.js (la misma de repartir
+     y de Etiquetas): varios criterios a la vez y «Señalar los N». Elegir un criterio no señala a nadie; lo ya
+     señalado no se quita al cambiar el filtro. Solo con matriculados de este curso (Datos.unidadesDistintas). */
+  async function pintarAtajosDeAlumnado(categoria, api, alSenalar) {
+    var caja = $('rel-atajos');
+    if (!caja) return;
+    if (categoria !== 'ALUMNADO' || !App.E.datos) {
+      caja.className = 'oculto';
+      caja.innerHTML = '';
+      return;
+    }
+
+    var fuente = await Datos.cargar(App.E.datos, 'ALUMNADO');
+    if (!$('rel-atajos')) return;   /* el cuadro se cerró mientras se leía */
+    if (!Datos.unidadesDistintas(fuente.lista).length || !window.RepartirFiltro) { caja.className = 'oculto'; caja.innerHTML = ''; return; }
+
+    var f = await RepartirFiltro.crear(fuente, [], {
+      abierto: true,
+      alSenalar: function (lista) {
+        if (alSenalar) {
+          var unico = f.conds.length === 1 && f.conds[0].tipo !== 'dato' ? f.conds[0] : null;
+          alSenalar(unico ? unico.tipo : 'lista', unico ? unico.valor : f.conds.map(function (c) { return c.valor; }).join(' '), lista);
+        }
+        api.marcar(lista.map(function (al) { return { categoria: 'ALUMNADO', nombre: App.textoTercero(al), persona: al }; }));
+      }
+    });
+    if (!f || !$('rel-atajos')) return;
+    function pintar() {
+      caja.className = 'atajos-grupo';
+      caja.innerHTML = RepartirFiltro.html(f);
+      RepartirFiltro.enganchar(f, caja, pintar);
+    }
+    pintar();
+  }
+
+  /* Fila 342: los niveles y las enseñanzas de unas unidades (las de Datos.unidadesDistintas), para los
+     atajos de aquí y para el filtro de js/repartir-filtro.js. */
+  function nivelesYEnsenanzas(unidades) {
+    var niveles = {}, ensenanzas = {};
+    (unidades || []).forEach(function (u) {
+      var p = Nombres.nivelYEnsenanza(u.unidad);
+      if (p.nivel) niveles[p.nivel] = true;
+      if (p.ensenanza) ensenanzas[p.ensenanza] = true;
+    });
+    return { niveles: Object.keys(niveles).sort(), ensenanzas: Object.keys(ensenanzas).sort() };
+  }
+
+  /* Los tres filtros de los atajos, sueltos y sin efectos: se pueden
+     probar sin datos ni navegador (pruebas/grupos.mjs). Solo entra el
+     alumnado matriculado este curso, aunque la unidad, el nivel o la
+     enseñanza coincidan: un solicitante o un alumno de un curso
+     anterior no tiene sitio en ningún atajo. */
+  function filtrarPorUnidad(lista, unidad) {
+    return lista.filter(function (al) { return al.matriculado && al.unidad === unidad; });
+  }
+  function filtrarPorNivel(lista, nivel) {
+    return lista.filter(function (al) {
+      return al.matriculado && Nombres.nivelYEnsenanza(al.unidad).nivel === nivel;
+    });
+  }
+  function filtrarPorEnsenanza(lista, ensenanza) {
+    return lista.filter(function (al) {
+      return al.matriculado && Nombres.nivelYEnsenanza(al.unidad).ensenanza === ensenanza;
+    });
+  }
+
+  /* "Meter un grupo entero": los grupos propios de Ajustes
+     (js/grupos.js). Elegir uno señala a todos sus miembros; los que ya
+     no estén en las listas también se señalan (por nombre), aunque el
+     buscador no pueda comprobarlos: se dejan tal cual, como dice el
+     punto 3 del documento. */
+  function pintarGrupoFila(api, alSenalar) {
+    var caja = $('rel-grupo-fila');
+    if (!caja) return;
+    var grupos = (window.Grupos && Grupos.lista()) || [];
+    if (!grupos.length) { caja.innerHTML = ''; return; }
+
+    caja.className = 'grupo-fila';
+    caja.innerHTML =
+      '<label class="etiqueta">Meter un grupo entero</label>' +
+      '<select id="rel-grupo-elegir" class="campo">' +
+        '<option value="">Elige un grupo…</option>' +
+        grupos.map(function (g) {
+          return '<option value="' + U.escapar(g.id) + '">' + U.escapar(g.nombre) +
+                 ' (' + g.miembros.length + ')</option>';
+        }).join('') +
+      '</select>';
+
+    $('rel-grupo-elegir').onchange = function () {
+      var g = grupos.filter(function (x) { return x.id === $('rel-grupo-elegir').value; })[0];
+      $('rel-grupo-elegir').value = '';
+      if (!g) return;
+      if (alSenalar) alSenalar('grupo', g.nombre, g.miembros);
+      api.marcar(g.miembros.map(function (m) { return { categoria: m.categoria, nombre: m.nombre }; }));
+    };
+  }
+
+  async function agregarVarios(a) {
+    var datosLista = null;   /* fila 722: las columnas de una lista pegada, para un asunto de grupo */
+    var marcados = await abrirAnadirRelacionados({ alSenalar: function (tipo, valor, lista, datos) {
+      if (datos && datos.columnas && datos.columnas.length && window.DatosDeLista) datosLista = DatosDeLista.unirPegadas(datosLista, datos);
+    } });
+    if (!marcados || !marcados.length) return false;
+
+    var categoriaPrincipal = (a.ficha && a.ficha.categoria) || (a.leido && a.leido.categoria) || '';
+    var terceroPrincipal = (a.ficha && a.ficha.tercero) || '';
+    var actuales = (a.ficha && a.ficha.relacionados) || [];
+    var resultado = combinarRelacionados(actuales, categoriaPrincipal, terceroPrincipal, marcados);
+
+    /* Fila 722: volver a pegar la lista pone al día los datos de esas personas aunque ya estuvieran en el grupo. */
+    var datosPuestos = false;
+    if (datosLista) {
+      try { datosPuestos = await DatosDeLista.poner(a.nombre, DatosDeLista.soloDe(datosLista, marcados)); }
+      catch (e5) { U.accesorio('No he podido guardar las columnas de la lista', e5); }
+    }
+    if (!resultado.anadidos) {
+      U.aviso(datosPuestos ? 'Nadie nuevo que añadir: ya estaban todos en el grupo. Sus datos de la lista están al día.' : 'Nadie nuevo que añadir: ya estaban todos en la lista.', datosPuestos ? 'bueno' : 'malo');
+      return datosPuestos;
+    }
+
+    try {
+      await App.anotarLista(a.nombre, 'relacionados', { anadir: resultado.nuevos });
+    } catch (e) {
+      U.aviso('No he podido guardarlo: ' + U.mensajeDeError(e), 'malo');
+      return false;
+    }
+
+    var partes = [resultado.anadidos + (resultado.anadidos === 1 ? ' añadido' : ' añadidos')];
+    if (resultado.yaEstaban) partes.push(resultado.yaEstaban + ' ya estaban');
+    if (resultado.esPropio) partes.push(resultado.esPropio + ' era el propio tercero');
+    U.aviso(partes.join(', ') + '.', 'bueno');
+    return true;
+  }
+
+  return {
+    elegirTercero: elegirTercero,
+    validarYAgregar: validarYAgregar,
+    agregarRelacionado: agregarRelacionado,
+    combinarRelacionados: combinarRelacionados,
+    agregarVarios: agregarVarios,
+    elegirVarios: abrirAnadirRelacionados,   /* fila 293: el mismo cuadro, para formar un grupo */
+    filtrarPorUnidad: filtrarPorUnidad,
+    filtrarPorNivel: filtrarPorNivel,
+    filtrarPorEnsenanza: filtrarPorEnsenanza,
+    nivelesYEnsenanzas: nivelesYEnsenanzas,
+    NOMBRE_FICHERO_MARCADOR: NOMBRE_FICHERO_MARCADOR,
+    nombreCarpetaMarcador: nombreCarpetaMarcador
+  };
+})();
+window.Relacionados = Relacionados;

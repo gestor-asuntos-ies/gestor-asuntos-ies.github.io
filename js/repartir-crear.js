@@ -1,0 +1,282 @@
+/* ============================================================
+   repartir-crear.js — repartir un PDF entre terceros: lo que se escribe
+   (fila 141, 25-sep-2026, docs/REPARTIR-ENTRE-TERCEROS.md).
+
+   Por cada trozo de una persona: crea su asunto (tipo elegido, ese
+   tercero, fecha = la del documento original, año académico como en
+   cualquier asunto nuevo, sin guía ni hitos), guarda dentro el trozo
+   con el nombre de siempre (`Nombres.montarDocumento`, mismo registro de
+   Séneca que el original), le apunta «Viene de …» y lo ARCHIVA en el
+   momento con el archivado de siempre (`App.cerrarAsunto`, sin su
+   pregunta: `App.E.archivarSinPreguntar`; hace también su índice del
+   expediente).
+
+   En el asunto de origen: el PDF completo se queda; los trozos «Se queda
+   en este asunto» se guardan como documentos propios; una nota con el
+   reparto; y en su ficha, `repartos` (documento, fecha y, por trozo,
+   páginas, tercero, asunto creado y si salió bien). Volver a repartir el
+   mismo PDF solo reintenta lo que falló.
+
+   Todo lo de asuntos.json por App.anotar / App.guardarRegistroFresco
+   (en fila de ColaGuardado), nunca directo.
+   ============================================================ */
+var RepartirCrear = (function () {
+
+  /* Fecha (AAAA-MM-DD) y registro de Séneca del nombre del PDF original. */
+  function datosDelOriginal(nombre) {
+    var l = (window.Documentos && Documentos.leerNombre) ? Documentos.leerNombre(nombre) : { fecha: '', registro: null };
+    var r = l.registro;
+    return { fecha: l.fecha || U.hoyIso(), codigo: r ? r.ano + r.sentido + r.modo + r.numero : '',
+             registro: r || null, numeroDoc: l.numero || '' };
+  }
+
+  function tipoPorNombre(nombre) {
+    return (App.E.tipos || []).filter(function (t) { return t.tipo === nombre; })[0] || null;
+  }
+
+  function nombreDelAsunto(tipo, tercero, fecha, numero, categoria) {
+    var t = tipoPorNombre(tipo);
+    return Nombres.montarAsunto({ fecha: fecha, tipo: t ? Nombres.tipoParaCarpeta(t) : tipo,
+      curso: U.cursoDeFecha(fecha), grupo: '', campos: [], descripcion: '', tercero: tercero,
+      numero: numero || '', categoria: categoria }).nombre;
+  }
+
+  /* Fila 239: todas las copias de un mismo documento (las que se quedan
+     en el asunto de origen y las de los asuntos nuevos) llevan el mismo
+     número de documento: `datos.numeroDoc`, dado una sola vez por reparto. */
+  function nombreDelDocumento(tipoDocumento, datos) {
+    return Nombres.montarDocumento({ fecha: datos.fecha, codigo: datos.codigo, tipo: tipoDocumento || 'DOCUMENTO',
+      extension: datos.extension || 'pdf', numeroDoc: datos.numeroDoc || '' });
+  }
+
+  /* Los datos del documento, para la ficha del asunto donde queda (fila 239). */
+  async function apuntarDocumento(asuntoNombre, tipoDocumento, datos) {
+    if (!datos.numeroDoc || !window.DocumentosDatos) return;
+    try {
+      await DocumentosDatos.anotar(asuntoNombre, datos.numeroDoc, {
+        tipo: tipoDocumento || 'DOCUMENTO', fecha: datos.fecha,
+        registros: datos.registro ? [datos.registro] : []
+      });
+    } catch (e) { /* accesorio: el documento ya está guardado */ }
+  }
+
+  /* Quién tiene ya un asunto de ese tipo, abierto o archivado. { tercero: true } */
+  async function yaTienen(tipo) {
+    var salida = {};
+    (App.E.listaAbiertos || []).forEach(function (a) {
+      var t = (a.leido && a.leido.tipo) || (a.ficha && a.ficha.tipo);
+      if (t === tipo && a.ficha && a.ficha.tercero) salida[a.ficha.tercero] = true;
+    });
+    if (window.IndiceArchivo) {
+      try {
+        /* Fila 177: quién ya tiene un asunto de este tipo se mira en
+           todos los cursos, no solo en el actual. */
+        var r = await IndiceArchivo.leerDisco({ todos: true });
+        if (r.ok) r.datos.asuntos.forEach(function (e) { if (e.tipo === tipo && e.tercero) salida[e.tercero] = true; });
+      } catch (e) { /* sin índice, no se sabe: no se avisa */ }
+    }
+    return salida;
+  }
+
+  function indices(t) { var l = []; for (var p = t.desde; p <= t.hasta; p++) l.push(p - 1); return l; }
+
+  /* Crea, guarda, anota y archiva el asunto de un trozo. Nunca lanza:
+     devuelve { ok, asunto, motivo }. */
+  async function crearUno(origen, bytes, trozo, persona, op, datos) {
+    var carpeta, nombre = '';
+    try {
+      /* Fila 239: cada asunto nuevo, con su número. */
+      var numero = (await Numeros.reservar('asuntos', '')).numero;
+      var categoria = (persona && persona.categoria) || 'ALUMNADO';
+      nombre = nombreDelAsunto(op.tipo, trozo.tercero, datos.fecha, numero, categoria);
+      if (await Carpetas.existe(App.E.abiertos, nombre)) return { ok: false, asunto: nombre, motivo: 'ya hay un asunto abierto con ese nombre' };
+      carpeta = await Carpetas.crear(App.E.abiertos, nombre);
+      await App.anotar(nombre, {
+        estado: 'abierto', tipo: op.tipo, categoria: (persona && persona.categoria) || 'ALUMNADO',
+        tercero: trozo.tercero, curso: U.cursoDeFecha(datos.fecha), grupo: '', descripcion: '', campos: {},
+        numero: numero,
+        abiertoEl: U.ahora(), abiertoPor: App.E.usuario, repartidoDe: origen.nombre
+      });
+      /* Fila 337: un fichero suelto (`trozo.fichero`) se guarda entero, con su extensión. */
+      var doc = trozo.fichero ? bytes : await PdfHerramientas.sacarPaginas(bytes, indices(trozo));
+      await Carpetas.escribirBytes(carpeta, nombreDelDocumento(op.tipoDocumento, datos), doc, trozo.fichero ? (datos.tipoMime || 'application/octet-stream') : 'application/pdf');
+      await apuntarDocumento(nombre, op.tipoDocumento, datos);
+      var a = { nombre: nombre, handle: carpeta, leido: Nombres.leer(nombre, App.E.tipos),
+                ficha: App.E.registro.asuntos[nombre] || {} };
+      if (window.Notas) await Notas.anadirAuto(a, 'Viene de ' + origen.nombre + ', ' + (trozo.fichero ? 'fichero ' + trozo.fichero : RepartirNucleo.textoPaginas(trozo).toLowerCase()));
+      a.ficha = App.E.registro.asuntos[nombre] || a.ficha;
+      App.E.archivarSinPreguntar = true;
+      try { await App.cerrarAsunto(a); } finally { App.E.archivarSinPreguntar = false; }
+      var archivado = false;
+      try {
+        var destino = await Carpetas.bajar(App.E.archivo, [a.ficha.categoria || 'ALUMNADO', trozo.tercero], false);
+        archivado = await Carpetas.existe(destino, window.ArchivoNombreCorto ? ArchivoNombreCorto.deArchivo(nombre) : nombre);   /* fila 648: en el archivo puede llevar un nombre más corto */
+      } catch (e) { archivado = false; }
+      if (archivado) return { ok: true, asunto: nombre };
+      var noCupo = window.ArchivarCabe && ArchivarCabe.noCupo(nombre);   /* fila 265 */
+      return { ok: false, asunto: nombre, motivo: noCupo ? 'creado, pero algún documento no cabe en el ARCHIVO' : 'creado, pero no se ha podido cerrar' };
+    } catch (e) {
+      return { ok: false, asunto: nombre, motivo: U.mensajeDeError(e) };
+    }
+  }
+
+  /* Un trozo que se queda en el asunto de origen, como documento propio. */
+  async function guardarEnOrigen(origen, bytes, trozo, op, datos) {
+    try {
+      var doc = await PdfHerramientas.sacarPaginas(bytes, indices(trozo));
+      var nombre = nombreDelDocumento(op.tipoDocumentoOrigen, datos);
+      if (await Carpetas.existeFichero(origen.handle, nombre)) nombre = await Carpetas.nombreLibreConSufijo(origen.handle, nombre);
+      await Carpetas.escribirBytes(origen.handle, nombre, doc, 'application/pdf');
+      await apuntarDocumento(origen.nombre, op.tipoDocumentoOrigen, datos);
+      return { ok: true, documento: nombre };
+    } catch (e) {
+      return { ok: false, motivo: U.mensajeDeError(e) };
+    }
+  }
+
+  /* `trozos`: los de la pantalla (con `hecho` los que ya salieron bien
+     otra vez). `op`: { tipo, tipoDocumento, tipoDocumentoOrigen, noCrear:
+     { tercero: true }, personas: { tercero: { categoria } }, deFuera: [
+     { categoria, nombre }] }. `progreso(n, total)`. */
+  async function repartir(origen, fichero, trozos, op, progreso) {
+    var bytes = new Uint8Array(await (await fichero.handle.getFile()).arrayBuffer());
+    var datos = datosDelOriginal(fichero.nombre);
+    /* Fila 239: un solo número de documento para todas las copias. */
+    datos.numeroDoc = datos.numeroDoc || (await Numeros.reservar('documentos', '')).numero;
+    var porHacer = trozos.filter(function (t) { return !t.hecho && (t.quedarse || (t.tercero && !(op.noCrear || {})[t.tercero])); });
+    var resultados = [], hechos = 0;
+    if (window.ArchivarCabe) ArchivarCabe.empezarLote();   /* fila 265 */
+    for (var i = 0; i < trozos.length; i++) {
+      var t = trozos[i];
+      var r = { desde: t.desde, hasta: t.hasta, quedarse: !!t.quedarse, tercero: t.tercero || '' };
+      if (t.hecho) { resultados.push(Object.assign(r, t.resultado || {}, { ok: true })); continue; }
+      if (porHacer.indexOf(t) === -1) { resultados.push(Object.assign(r, { ok: false, omitido: true })); continue; }
+      if (progreso) progreso(++hechos, porHacer.length);
+      var hecho = t.quedarse
+        ? await guardarEnOrigen(origen, bytes, t, op, datos)
+        : await crearUno(origen, bytes, t, (op.personas || {})[t.tercero], op, datos);
+      resultados.push(Object.assign(r, hecho));
+    }
+
+    /* El asunto de origen: relacionados nuevos, la nota y `repartos`. */
+    var lineas = resultados.filter(function (x) { return !x.omitido; }).map(function (x) {
+      var pag = RepartirNucleo.textoPaginas(x);
+      if (x.quedarse) return pag + ' → se queda en este asunto' + (x.documento ? ' (' + x.documento + ')' : '') + (x.ok ? '' : ' — NO SE PUDO');
+      return pag + ' → ' + x.tercero + (x.asunto ? ' (asunto ' + x.asunto + ')' : '') + (x.ok ? '' : ' — NO SE PUDO: ' + (x.motivo || ''));
+    });
+    try {
+      await App.guardarRegistroFresco(function (registro) {
+        var f = registro.asuntos[origen.nombre] || (registro.asuntos[origen.nombre] = {});
+        if ((op.deFuera || []).length && window.Relacionados) {
+          f.relacionados = Relacionados.combinarRelacionados(f.relacionados || [], f.categoria, f.tercero, op.deFuera).finales;
+        }
+        f.repartos = (f.repartos || []).filter(function (x) { return x.documento !== fichero.nombre; }).concat([{
+          documento: fichero.nombre, fecha: U.ahora(),
+          trozos: resultados.map(function (x) {
+            var s = { desde: x.desde, hasta: x.hasta, ok: !!x.ok };
+            if (x.quedarse) { s.quedarse = true; if (x.documento) s.documento = x.documento; }
+            else { s.tercero = x.tercero; if (x.asunto) s.asunto = x.asunto; }
+            return s;
+          })
+        }]);
+      });
+      if (window.Notas && lineas.length) {
+        var a = { nombre: origen.nombre, ficha: App.E.registro.asuntos[origen.nombre] || {} };
+        await Notas.anadirAuto(a, 'Reparto de ' + fichero.nombre + ':\n' + lineas.join('\n'));
+      }
+    } catch (e) {
+      U.accesorio('Reparto hecho, pero no he podido apuntarlo en el asunto de origen', e);
+    }
+    if (window.ArchivarCabe) ArchivarCabe.avisarLote();   /* fila 265: un solo aviso ámbar */
+    try { await App.verAbiertos(); } catch (e2) { /* solo pintar */ }
+    return resultados;
+  }
+
+  /* ---------- varios ficheros sueltos, uno por persona (fila 337) ----------
+
+     `ficheros`: [{ nombre, handle, tercero }] (solo los que tienen persona). Por cada uno: el asunto de
+     esa persona, ya archivado, con el fichero entero (fecha y registro de su propio nombre, un número de
+     documento para él) y, SOLO si se guardó bien, el fichero sale del asunto de origen por la papelera.
+     `op`: { tipo, tipoDocumento, noCrear, personas, deFuera }. Devuelve [{ nombre, tercero, ok, asunto, motivo }]. */
+  async function repartirFicheros(origen, ficheros, op, progreso) {
+    var resultados = [];
+    var porHacer = ficheros.filter(function (f) { return f.tercero && !(op.noCrear || {})[f.tercero]; });
+    var hechos = 0;
+    if (window.ArchivarCabe) ArchivarCabe.empezarLote();
+    for (var i = 0; i < porHacer.length; i++) {
+      var f = porHacer[i];
+      if (progreso) progreso(++hechos, porHacer.length);
+      var r = { nombre: f.nombre, tercero: f.tercero, ok: false };
+      try {
+        var archivo = await f.handle.getFile();
+        var bytes = new Uint8Array(await archivo.arrayBuffer());
+        var datos = datosDelOriginal(f.nombre);
+        datos.numeroDoc = datos.numeroDoc || (await Numeros.reservar('documentos', '')).numero;
+        datos.extension = (Nombres.extensionDe ? Nombres.extensionDe(f.nombre) : (f.nombre.match(/\.([A-Za-z0-9]{1,8})$/) || [])[1]) || '';
+        datos.tipoMime = archivo.type || '';
+        var hecho = await crearUno(origen, bytes, { fichero: f.nombre, desde: 1, hasta: 1, tercero: f.tercero },
+          (op.personas || {})[f.tercero], op, datos);
+        Object.assign(r, hecho);
+        if (hecho.ok) {
+          try {
+            await Papelera.mandarDocumentoDeAsunto({ handle: origen.handle, nombre: origen.nombre, ficha: origen.ficha }, f.nombre);
+          } catch (e) { r.ok = false; r.motivo = 'repartido, pero no he podido quitarlo del asunto de origen: ' + U.mensajeDeError(e); }
+        }
+      } catch (e) {
+        r.motivo = U.mensajeDeError(e);
+      }
+      resultados.push(r);
+    }
+    var lineas = resultados.map(function (x) {
+      return x.nombre + ' → ' + x.tercero + (x.asunto ? ' (asunto ' + x.asunto + ')' : '') + (x.ok ? '' : ' — NO SE PUDO: ' + (x.motivo || ''));
+    });
+    try {
+      await App.guardarRegistroFresco(function (registro) {
+        var f2 = registro.asuntos[origen.nombre] || (registro.asuntos[origen.nombre] = {});
+        if ((op.deFuera || []).length && window.Relacionados) {
+          f2.relacionados = Relacionados.combinarRelacionados(f2.relacionados || [], f2.categoria, f2.tercero, op.deFuera).finales;
+        }
+        f2.repartos = (f2.repartos || []).concat([{
+          documento: 'ficheros ' + U.ahora(), fecha: U.ahora(),
+          ficheros: resultados.map(function (x) {
+            var s = { nombre: x.nombre, tercero: x.tercero, ok: !!x.ok };
+            if (x.asunto) s.asunto = x.asunto;
+            return s;
+          })
+        }]);
+      });
+      if (window.Notas && lineas.length) {
+        await Notas.anadirAuto({ nombre: origen.nombre, ficha: App.E.registro.asuntos[origen.nombre] || {} },
+          'Reparto de ficheros:\n' + lineas.join('\n'));
+      }
+    } catch (e) {
+      U.accesorio('Reparto hecho, pero no he podido apuntarlo en el asunto de origen', e);
+    }
+    if (window.ArchivarCabe) ArchivarCabe.avisarLote();
+    try { await App.verAbiertos(); } catch (e2) { /* solo pintar */ }
+    return resultados;
+  }
+
+  /* Fila 339: lo repartido en OTROS documentos del mismo asunto (trozos de un PDF o ficheros sueltos, fila 337).
+     Devuelve { hay, recibieron: { tercero: true } } con los que recibieron algo que salió bien. */
+  function otrosRepartos(origen, nombrePdf) {
+    var f = (App.E.registro.asuntos || {})[origen.nombre] || origen.ficha || {};
+    var salida = { hay: false, recibieron: {} };
+    (f.repartos || []).forEach(function (r) {
+      if (r.documento === nombrePdf) return;
+      salida.hay = true;
+      (r.trozos || []).concat(r.ficheros || []).forEach(function (t) { if (t.ok && t.tercero) salida.recibieron[t.tercero] = true; });
+    });
+    return salida;
+  }
+
+  /* Lo ya repartido de este PDF, si se repartió antes. */
+  function repartoAnterior(origen, nombrePdf) {
+    var f = (App.E.registro.asuntos || {})[origen.nombre] || origen.ficha || {};
+    return (f.repartos || []).filter(function (r) { return r.documento === nombrePdf; })[0] || null;
+  }
+
+  return { datosDelOriginal: datosDelOriginal, nombreDelAsunto: nombreDelAsunto, yaTienen: yaTienen,
+           repartir: repartir, repartirFicheros: repartirFicheros, repartoAnterior: repartoAnterior, otrosRepartos: otrosRepartos };
+})();
+window.RepartirCrear = RepartirCrear;

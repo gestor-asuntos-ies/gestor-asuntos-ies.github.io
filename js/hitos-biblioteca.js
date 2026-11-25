@@ -1,0 +1,446 @@
+/* ============================================================
+   hitos-biblioteca.js — el modelo de la biblioteca de hitos del
+   centro (20-sep-2026, fila 79, docs/BIBLIOTECA-DE-HITOS.md).
+
+   Una colección de "hitos modelo", guardada una sola vez en
+   _GESTOR/hitos-biblioteca.json (el decimosexto fichero compartido,
+   ver js/copias.js), para no reescribir el mismo paso del trámite en
+   cada Tipo de Asunto que lo necesite. Al escribir la guía de un tipo,
+   un modelo se trae como COPIA: el paso que queda en guias.json lleva
+   además `origenBiblioteca: { id, revision, divergido }`.
+
+   Aquí solo vive el modelo (leer, escribir, crear/editar/borrar un
+   modelo, comparar un paso con el suyo) y las dos funciones puras que
+   pide el apartado 4.6 (si un hito traído nace "Solo informativo") y
+   el 4.7 (el enlace de una referencia de normativa). La pintura — el
+   panel de "traer", el botón "Guardar en la biblioteca", el cuadro de
+   comparación y el bloque de Ajustes — vive en js/guias-biblioteca.js.
+
+   Se carga después de js/guias.js y js/guias-requisitos.js: reutiliza
+   Guias.normalizarRequisitos, Guias.normalizarComunicacion y
+   Guias.normalizarNormativa para que un modelo tenga exactamente la
+   misma forma que un paso de guía, en los dos sentidos, sin inventar
+   una forma nueva.
+   ============================================================ */
+var HitosBiblioteca = (function () {
+
+  var FICHERO = 'hitos-biblioteca.json';
+
+  function nuevoId() { return U.nuevoId('b'); }
+
+  function gestor() { return window.Gestor && window.Gestor.carpetaGestor(); }
+
+  /* ==========================================================
+     LOS BLOQUES DEL SISTEMA DE NORMATIVA (apartado 4.7)
+     ========================================================== */
+
+  var BLOQUES_NORMATIVA = [
+    { clave: 'escolarizacion', nombre: 'Escolarización' },
+    { clave: 'convivencia', nombre: 'Convivencia' },
+    { clave: 'matricula', nombre: 'Matrícula y expedientes' },
+    { clave: 'evaluacion', nombre: 'Evaluación y titulación' },
+    { clave: 'personal', nombre: 'Personal del centro' },
+    { clave: 'economica', nombre: 'Gestión económica' },
+    { clave: 'becas', nombre: 'Becas, transporte y comedor' },
+    { clave: 'datos', nombre: 'Datos y administración electrónica' },
+    { clave: 'opo', nombre: 'Temario C1.1000' }
+  ];
+
+  function nombreDeBloque(clave) {
+    var b = BLOQUES_NORMATIVA.filter(function (x) { return x.clave === clave; })[0];
+    return b ? b.nombre : clave;
+  }
+
+  /* El enlace de una referencia de normativa (función pura, apartado
+     4.7, retocada la fila 87, docs/ENLACE-AL-ARTICULO-DE-NORMATIVA.md):
+     con clave, se monta contra la vista de un solo artículo del sistema
+     de normativa del centro, `<base>/norma#r=<clave>`; el bloque ya no
+     interviene en el enlace, solo sigue guardado para saber dónde vive
+     el artículo. Sin clave, con `url` si la lleva; sin nada, no hay
+     enlace y la cita se ve como texto suelto. `direccionBase` puede
+     venir vacía (Ajustes sin rellenar todavía): entonces tampoco hay
+     enlace, aunque haya clave. */
+  function enlaceDeNormativa(ref, direccionBase) {
+    if (!ref) return '';
+    if (ref.clave && direccionBase) {
+      var base = direccionBase.replace(/\/$/, '').replace(/\/norma$/, '');
+      return base + '/norma#r=' + encodeURIComponent(ref.clave);
+    }
+    if (!ref.clave && ref.url) return enlaceDeUrlDeNormativa(ref.url, direccionBase) || (esDeNormativa(ref.url) ? '' : ref.url);
+    return '';
+  }
+
+  /* Fila 232 (docs/ENLACE-A-NORMATIVA-CORRECTO.md): una `url` guardada que es
+     del propio sistema de normativa (`vercel.app` o `normativa.fmargon.com`).
+     PURA. */
+  var RE_NORMATIVA = /^https?:\/\/(?:normativa-escolarizacion\.vercel\.app|normativa\.fmargon\.com)(?:[\/?#]|$)/i;
+  function esDeNormativa(url) { return RE_NORMATIVA.test(String(url || '').trim()); }
+
+  /* Si la url es del sistema de normativa: `<base>/norma#r=<clave>` cuando se
+     saca la clave del `#r=`; sin clave (solo la base) o hacia `/oposicion`, ''.
+     Si no es de ese sitio, '' (el llamante usa la url tal cual). */
+  function enlaceDeUrlDeNormativa(url, direccionBase) {
+    url = String(url || '').trim();
+    if (!esDeNormativa(url)) return '';
+    var m = url.match(/#r=([^&#]+)/);
+    if (!m || /^https?:\/\/[^\/]+\/oposicion/i.test(url)) return '';
+    var base = String(direccionBase || 'https://normativa.fmargon.com').replace(/\/$/, '').replace(/\/norma$/, '');
+    return base + '/norma#r=' + m[1];
+  }
+
+  /* ==========================================================
+     LEER Y ESCRIBIR EL FICHERO
+     ========================================================== */
+
+  function normalizarModelo(m) {
+    return {
+      id: (m && m.id) || nuevoId(),
+      nombre: String((m && m.nombre) || ''),
+      revision: (m && parseInt(m.revision, 10)) || 1,
+      titulo: String((m && m.titulo) || ''),
+      explicacion: (window.Guias ? Guias.limpiar((m && m.explicacion) || '') : String((m && m.explicacion) || '')),
+      responsable: String((m && m.responsable) || ''),
+      estadoAsunto: (m && m.estadoAsunto) || null,
+      plazo: (m && m.plazo && m.plazo.dias)
+        ? { dias: parseInt(m.plazo.dias, 10) || 0, desde: '',   /* fila 284: un modelo no dice «desde qué hito» */
+            cuenta: Plazos.cuentaValida(m.plazo.cuenta) } : null,   /* y se cuenta también en «meses» */
+      requisitos: window.Guias ? Guias.normalizarRequisitos(m && m.requisitos) : [],
+      comunicacion: window.Guias ? Guias.normalizarComunicacion(m && m.comunicacion) : null,
+      soloInformativo: !!(m && m.soloInformativo),
+      /* 28-sep-2026, fila 201, docs/NOMBRE-DE-DOCUMENTO-PROPUESTO.md,
+         apartado 1: el texto y el tipo de documento que se proponen al
+         añadir o nombrar un documento desde este hito (apartado 4,
+         js/documentos-formulario.js). Los mismos huecos que una
+         plantilla ({nombre}, {curso}, {grupo}, {tipo}, {campo:...}…). */
+      textoDocumentos: String((m && m.textoDocumentos) || ''),
+      tipoDocumento: String((m && m.tipoDocumento) || ''),
+      normativa: window.Guias ? Guias.normalizarNormativa(m && m.normativa) : [],
+      /* 20-sep-2026, fila 82, docs/FORMULARIOS-OFICIALES.md. */
+      formularios: Array.isArray(m && m.formularios) ? m.formularios.map(String) : [],
+      /* 23-sep-2026, fila 102: las plantillas de documento unidas al modelo. */
+      plantillasDocumento: window.Guias ? Guias.listaDeIds(m && m.plantillasDocumento)
+        : (Array.isArray(m && m.plantillasDocumento) ? m.plantillasDocumento.map(String) : []),
+      /* 24-sep-2026, fila 109: el guion del hito (js/guias-guion.js). */
+      guion: window.GuiasGuion ? GuiasGuion.normalizar(m && m.guion) : ((m && m.guion) || []),
+      creadoEl: String((m && m.creadoEl) || U.hoyIso()),
+      actualizadoEl: String((m && m.actualizadoEl) || U.hoyIso()),
+      actualizadoPor: String((m && m.actualizadoPor) || '')
+    };
+  }
+
+  function normalizar(leido) {
+    var l = leido || {};
+    return {
+      version: 1,
+      /* Fila 284: la marca de que js/plazos-del-centro.js ya hizo su pasada (no se repite sola). */
+      plazosDelCentro: parseInt(l.plazosDelCentro, 10) || 0,
+      /* Fila 299: la marca de que js/informar-al-tutor.js ya hizo su pasada. */
+      informarAlTutor: parseInt(l.informarAlTutor, 10) || 0,
+      modelos: (Array.isArray(l.modelos) ? l.modelos : []).map(normalizarModelo)
+    };
+  }
+
+  function vacio() { return normalizar(null); }
+
+  async function leer() {
+    var g = gestor();
+    if (!g) return vacio();
+    var leido = await Carpetas.leerJson(g, FICHERO);
+    return normalizar(leido);
+  }
+
+  /* Como todo fichero compartido: se relee justo antes de escribir. */
+  async function cambiar(hacer) {
+    var g = gestor();
+    if (!g) return vacio();
+    var actual = await leer();
+    var nuevo = hacer(actual) || actual;
+    await Copias.guardar(g, FICHERO, nuevo);
+    return nuevo;
+  }
+
+  function buscar(datos, id) {
+    return (datos.modelos || []).filter(function (m) { return m.id === id; })[0] || null;
+  }
+
+  /* ==========================================================
+     UN PASO DE GUÍA, EN LA FORMA DE UN MODELO (y al revés)
+     ========================================================== */
+
+  /* Un paso-pregunta no se puede guardar en la biblioteca (sección 2
+     del encargo: "Un modelo es siempre un paso normal"). */
+  function esPasoValido(paso) {
+    return !!(paso && (!window.Guias || !Guias.esPregunta(paso)));
+  }
+
+  function pasoAModelo(paso, nombre, revisionPrevia, usuario) {
+    return normalizarModelo({
+      id: nuevoId(),
+      nombre: nombre || paso.titulo || 'Sin nombre',
+      revision: revisionPrevia || 1,
+      titulo: paso.titulo, explicacion: paso.cuerpo,
+      responsable: paso.responsable, estadoAsunto: paso.estadoAsunto,
+      plazo: paso.plazo ? { dias: paso.plazo.dias, cuenta: paso.plazo.cuenta } : null,   /* sin «desde» (fila 284) */
+      requisitos: paso.requisitos, comunicacion: paso.comunicacion,
+      soloInformativo: paso.soloInformativo, normativa: paso.normativa,
+      formularios: paso.formularios,
+      textoDocumentos: paso.textoDocumentos, tipoDocumento: paso.tipoDocumento,
+      plantillasDocumento: paso.plantillasDocumento,
+      guion: paso.guion,
+      actualizadoPor: usuario || ''
+    });
+  }
+
+  /* Un modelo, insertado como paso nuevo dentro de una guía (apartado
+     4.1: "es una copia"). `origenBiblioteca` es lo único que lo
+     distingue de un paso escrito a mano. */
+  /* Fila 284: `desde` es el id del paso que queda encima en la guía; el plazo
+     del modelo cuenta desde él. Sin `desde`, el paso llega sin plazo. */
+  function modeloAPaso(modelo, desde) {
+    var paso = {
+      id: (window.Guias ? Guias.nuevoId() : nuevoId()),
+      titulo: modelo.titulo, cuerpo: modelo.explicacion, opciones: [],
+      responsable: modelo.responsable, estadoAsunto: modelo.estadoAsunto,
+      plazo: (modelo.plazo && desde) ? { dias: modelo.plazo.dias, desde: desde, cuenta: modelo.plazo.cuenta } : null,
+      requisitos: (modelo.requisitos || []).map(function (r) { return Object.assign({}, r); }),
+      comunicacion: modelo.comunicacion ? Object.assign({}, modelo.comunicacion) : null,
+      soloInformativo: modelo.soloInformativo,
+      normativa: (modelo.normativa || []).map(function (n) { return Object.assign({}, n); }),
+      formularios: (modelo.formularios || []).slice(),
+      textoDocumentos: modelo.textoDocumentos || '', tipoDocumento: modelo.tipoDocumento || '',
+      plantillasDocumento: (modelo.plantillasDocumento || []).slice(),
+      guion: JSON.parse(JSON.stringify(modelo.guion || [])),   /* entero, con sus preguntas (fila 116) */
+      origenBiblioteca: { id: modelo.id, revision: modelo.revision, divergido: false }
+    };
+    /* Fila 138: un modelo de antes con «lo que hay que reunir» lo trae ya
+       como líneas del guion (js/reunir-migracion.js). */
+    if (window.ReunirMigracion) ReunirMigracion.pasoAGuion(paso);
+    return paso;
+  }
+
+  /* Los campos que se comparan entre un paso y su modelo (apartado 4.3
+     y 4.4). `soloInformativo` queda fuera a propósito: "no cuenta como
+     cambio del modelo" (es una decisión de cada tipo, no del modelo).
+     Fila 199 (27-sep-2026, docs/AJUSTES-DEL-TIPO-Y-HERRAMIENTAS.md,
+     apartado 4): `comunicacion` y `plantillasDocumento` ya no se
+     comparan aparte — ese contenido vive en tareas del guion (`guion`,
+     que sí sigue comparándose), y un paso o un modelo de antes de esta
+     fila puede llegar con esos dos campos todavía con algo dentro, sin
+     que cuente como diferencia. */
+  var CAMPOS_COMPARABLES = [
+    { clave: 'titulo', etiqueta: 'Título' },
+    { clave: 'cuerpo', modeloClave: 'explicacion', etiqueta: 'Explicación' },
+    { clave: 'responsable', etiqueta: 'Responsable' },
+    { clave: 'estadoAsunto', etiqueta: 'Estado del asunto' },
+    { clave: 'plazo', etiqueta: 'Plazo' },
+    /* «Lo que hay que reunir» ya no se compara aparte: va en el guion (fila 138). */
+    { clave: 'normativa', etiqueta: 'Normativa' },
+    { clave: 'guion', etiqueta: 'Tareas' },
+    /* «Avisar a quien lo pide» (fila 195). */
+    { clave: 'avisarLoPide', etiqueta: 'Avisar a quien lo pide' },
+    { clave: 'avisarLoPidePlantilla', etiqueta: 'Plantilla del aviso' },
+    /* Fila 201: el texto y el tipo de documento propuestos (apartado 1). */
+    { clave: 'textoDocumentos', modeloClave: 'textoDocumentos', etiqueta: 'Texto de los documentos de este hito' },
+    { clave: 'tipoDocumento', modeloClave: 'tipoDocumento', etiqueta: 'Tipo de documento habitual' }
+  ];
+
+  function textoLegibleDe(clave, valor) {
+    if (clave === 'avisarLoPide') return valor ? 'Sí' : 'No';
+    if (clave === 'avisarLoPidePlantilla') {
+      if (!valor) return '(vacío)';
+      var pl = window.Plantillas && window.Plantillas.enMemoria ? Plantillas.enMemoria() : null;
+      var encontrada = pl ? (pl.lista || []).filter(function (p) { return p.id === valor; })[0] : null;
+      return encontrada ? encontrada.nombre : valor;
+    }
+    if (valor === null || valor === undefined || valor === '') return '(vacío)';
+    if (clave === 'plazo') {
+      return valor.dias ? ((typeof Plazos !== 'undefined' && Plazos.textoPlazo ? Plazos.textoPlazo(valor) : valor.dias + ' días')) : '(vacío)';
+    }
+    if (clave === 'requisitos') {
+      var lista = valor || [];
+      return lista.length ? lista.map(function (r) { return r.texto; }).join('; ') : '(vacío)';
+    }
+    if (clave === 'comunicacion') {
+      var c = valor || {};
+      var canales = [];
+      if (c.correo && c.correo.cuerpo) canales.push('correo');
+      if (c.seneca && c.seneca.cuerpo) canales.push('Séneca');
+      return canales.length ? canales.join(' y ') : '(vacío)';
+    }
+    if (clave === 'guion') {
+      var pasos = valor || [];
+      if (!pasos.length) return '(vacío)';
+      return window.GuiasGuion ? GuiasGuion.textoLegible(pasos)
+        : pasos.map(function (g) { return g.texto + (g.accion ? ' [' + g.accion + ']' : ''); }).join('; ');
+    }
+    if (clave === 'normativa') {
+      var refs = valor || [];
+      return refs.length ? refs.map(function (r) { return r.cita; }).join('; ') : '(vacío)';
+    }
+    /* Fila 102: los nombres de las plantillas; un id que ya no existe,
+       "(plantilla borrada)". */
+    if (clave === 'plantillasDocumento') {
+      var ids = valor || [];
+      if (!ids.length) return '(vacío)';
+      return ids.map(function (id) {
+        var d = window.Plantillas && Plantillas.documentoPorId ? Plantillas.documentoPorId(id) : undefined;
+        return d === undefined ? id : (d ? d.nombre : '(plantilla borrada)');
+      }).join(', ');
+    }
+    return String(valor);
+  }
+
+  /* Compara `paso` (o el modelo mismo, para comparar dos modelos entre
+     sí no hace falta aquí) contra `modelo`, campo a campo. Devuelve una
+     lista de { campo, etiqueta, antes, despues }, vacía si son iguales
+     en todo lo que cuenta. La comparación es por el texto que se le
+     enseña a Francisco, no por igualdad estricta de objetos: dos
+     `plazo` con el mismo número de días son iguales aunque sean dos
+     objetos distintos en memoria. */
+  function diferencias(paso, modelo) {
+    if (!paso || !modelo) return [];
+    var salida = [];
+    CAMPOS_COMPARABLES.forEach(function (c) {
+      var valorPaso = paso[c.clave];
+      var valorModelo = modelo[c.modeloClave || c.clave];
+      var antes = textoLegibleDe(c.clave, valorPaso);
+      var despues = textoLegibleDe(c.clave, valorModelo);
+      if (antes !== despues) salida.push({ campo: c.clave, etiqueta: c.etiqueta, antes: antes, despues: despues });
+    });
+    return salida;
+  }
+
+  /* ==========================================================
+     CREAR, ACTUALIZAR Y BORRAR UN MODELO
+     ========================================================== */
+
+  async function crearDesdePaso(paso, nombre, usuario) {
+    var modelo = pasoAModelo(paso, nombre, 1, usuario);
+    await cambiar(function (d) { d.modelos.push(modelo); return d; });
+    return modelo;
+  }
+
+  /* Fila 417 (docs/HITOS-UN-SOLO-SITIO.md, parte B): ya no se sube ni se
+     cambia nada de un modelo desde las guías; solo se crea (las pruebas y la
+     carga del centro) y se quita (los «Sin tipo» del buscador). */
+
+  async function borrar(idModelo) {
+    await cambiar(function (d) {
+      d.modelos = d.modelos.filter(function (m) { return m.id !== idModelo; });
+      return d;
+    });
+  }
+
+  /* ==========================================================
+     «TRAER UN HITO DE OTRO TIPO» (fila 417)
+
+     La biblioteca ya no es un almacén aparte: el buscador lista los
+     hitos de las guías de los demás tipos, y los modelos de la biblioteca
+     que ninguna guía usa quedan en «Sin tipo». Traer uno es hacer una
+     copia suelta: id nuevo, sin `origenBiblioteca`, y cambiarla no toca
+     el original (ni al revés).
+     ========================================================== */
+
+  /* `guiasPorTipo` es guias.json entero ({ TIPO: [pasos] }). Solo los hitos
+     de arriba de cada guía (no los de dentro de una pregunta), sin los
+     hitos-pregunta ni los que no tienen título. Los tipos, por nombre. */
+  function hitosDeOtrosTipos(guiasPorTipo, tipoActual) {
+    return Object.keys(guiasPorTipo || {}).filter(function (t) { return t !== tipoActual; })
+      .sort(function (a, b) { return a.localeCompare(b, 'es'); })
+      .map(function (t) {
+        return {
+          tipo: t,
+          hitos: (guiasPorTipo[t] || []).filter(function (p) {
+            return p && esPasoValido(p) && !(p.opciones && p.opciones.length) && String(p.titulo || '').trim();
+          })
+        };
+      }).filter(function (g) { return g.hitos.length; });
+  }
+
+  /* Los modelos que ninguna guía usa (ningún paso con su `origenBiblioteca.id`). */
+  function modelosSinTipo(datos, guiasPorTipo) {
+    return (datos.modelos || []).filter(function (m) { return !tiposQueUsan(m.id, guiasPorTipo).length; });
+  }
+
+  /* Un hito de otra guía, como hito suelto de la que se está escribiendo.
+     `desde` es el id del hito que queda encima. El plazo de la guía de origen
+     contaba desde un hito de aquella guía: aquí cuenta desde el de arriba (o
+     se queda sin plazo si no hay ninguno) y el hito lleva `avisoPlazoAjeno`
+     para que el editor diga «revísalo». */
+  function copiaSuelta(paso, desde) {
+    var copia = JSON.parse(JSON.stringify(paso));
+    copia.id = (window.Guias ? Guias.nuevoId() : nuevoId());
+    delete copia.origenBiblioteca;
+    delete copia.divergido;
+    copia.opciones = [];
+    delete copia.soloSi;   /* fila 576: el campo es de otro tipo */
+    (copia.guion || []).forEach(function (g) { delete g.soloSi; });
+    if (copia.plazo && copia.plazo.dias) {
+      copia.plazo = desde ? { dias: copia.plazo.dias, desde: desde, cuenta: copia.plazo.cuenta } : null;
+      copia.avisoPlazoAjeno = true;
+    } else copia.plazo = null;
+    return copia;
+  }
+
+  /* Un modelo de «Sin tipo», igual: copia suelta, sin vínculo con la biblioteca. */
+  function copiaSueltaDeModelo(modelo, desde) {
+    var paso = modeloAPaso(modelo, desde);
+    delete paso.origenBiblioteca;
+    return paso;
+  }
+
+  /* En qué tipos está en uso un modelo (para el aviso de "borrar uno
+     que está en uso", apartado 4.5). `guiasPorTipo` es el objeto entero
+     de guias.json ({ TIPO: [pasos] }); recorre también las opciones de
+     una pregunta, por si un subpaso viene de la biblioteca. */
+  function tiposQueUsan(idModelo, guiasPorTipo) {
+    var tipos = [];
+    Object.keys(guiasPorTipo || {}).forEach(function (tipo) {
+      var usado = false;
+      (function recorrer(pasos) {
+        (pasos || []).forEach(function (p) {
+          if (p.origenBiblioteca && p.origenBiblioteca.id === idModelo) usado = true;
+          (p.opciones || []).forEach(function (o) { recorrer(o.pasos); });
+        });
+      })(guiasPorTipo[tipo]);
+      if (usado) tipos.push(tipo);
+    });
+    return tipos;
+  }
+
+  /* ==========================================================
+     APARTADO 4.6: ¿NACE MARCADO "SOLO INFORMATIVO"?
+
+     Función pura: nace marcado cuando el responsable del hito NO es
+     Administración/Secretaría. `idResponsableAdministracion` es el que
+     Francisco tenga configurado como propio del puesto en Ajustes → El
+     centro (`js/hitos-ajustes.js`); sin poder determinarlo, nace sin
+     marcar (mejor de menos que reclamar trabajo de más por error).
+     ========================================================== */
+  /* Fila 104: el segundo dato puede ser también los `ajustes` de
+     hitos.json; entonces decide la marca "Administración" de cada
+     responsable (Hitos.esDeAdministracion), el mismo sitio que usa la
+     lista de asuntos abiertos. */
+  function naceSoloInformativo(idResponsable, idResponsableAdministracion) {
+    if (idResponsable && idResponsableAdministracion && typeof idResponsableAdministracion === 'object' &&
+        window.Hitos && Hitos.esDeAdministracion) {
+      return !Hitos.esDeAdministracion(idResponsable, idResponsableAdministracion);
+    }
+    if (!idResponsable || !idResponsableAdministracion) return false;
+    return idResponsable !== idResponsableAdministracion;
+  }
+
+  return {
+    FICHERO: FICHERO, BLOQUES_NORMATIVA: BLOQUES_NORMATIVA, nombreDeBloque: nombreDeBloque,
+    enlaceDeNormativa: enlaceDeNormativa, esDeNormativa: esDeNormativa,
+    leer: leer, cambiar: cambiar, buscar: buscar,
+    esPasoValido: esPasoValido, modeloAPaso: modeloAPaso,
+    diferencias: diferencias, crearDesdePaso: crearDesdePaso, borrar: borrar,
+    hitosDeOtrosTipos: hitosDeOtrosTipos, modelosSinTipo: modelosSinTipo,
+    copiaSuelta: copiaSuelta, copiaSueltaDeModelo: copiaSueltaDeModelo,
+    tiposQueUsan: tiposQueUsan, naceSoloInformativo: naceSoloInformativo,
+    /* para las pruebas */
+    _normalizarModelo: normalizarModelo, _pasoAModelo: pasoAModelo
+  };
+})();
+window.HitosBiblioteca = HitosBiblioteca;

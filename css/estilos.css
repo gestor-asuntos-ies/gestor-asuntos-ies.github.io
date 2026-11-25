@@ -1,0 +1,670 @@
+:root {
+  --tinta: #1b2430;
+  --tinta-suave: #5d6b7a;
+  --linea: #dde3ea;
+  --fondo: #f4f6f9;
+  --papel: #ffffff;
+  --azul: #1f4e79;
+  --azul-claro: #e8f0f8;
+  --ambar: #fff4d6;
+  --ambar-linea: #e0b34a;
+  --verde: #e7f5ec;
+  --rojo: #fdecec;
+  --rojo-linea: #c0392b;
+  --radio: 10px;
+  --sombra: 0 1px 2px rgba(20,30,45,.06), 0 4px 12px rgba(20,30,45,.05);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  color: var(--tinta);
+  background: var(--fondo);
+}
+
+.oculto { display: none !important; }
+.suave { color: var(--tinta-suave); font-weight: 400; }
+code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+/* ---------- arranque ---------- */
+.arranque {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: linear-gradient(160deg, #1f4e79 0%, #2c6ea8 100%);
+}
+.arranque-caja {
+  background: var(--papel);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(10,25,45,.28);
+  padding: 34px 34px 28px;
+  width: 100%; max-width: 560px;
+}
+.arranque h1 { margin: 0 0 4px; font-size: 26px; }
+.lema { margin: 0 0 22px; color: var(--tinta-suave); }
+.explica { color: var(--tinta-suave); line-height: 1.5; margin: 0 0 16px; }
+.nota { color: var(--tinta-suave); font-size: 13px; line-height: 1.5; margin: 16px 0 0; }
+
+.carpeta-fila {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  border: 1px solid var(--linea); border-radius: var(--radio);
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.carpeta-rotulo { font-weight: 600; }
+.carpeta-estado { color: var(--tinta-suave); font-size: 13px; margin-top: 2px; }
+.carpeta-estado.puesta { color: #1e7a46; }
+
+/* ---------- botones y campos ---------- */
+.boton {
+  font: inherit; font-size: 14px;
+  background: var(--papel); color: var(--tinta);
+  border: 1px solid var(--linea); border-radius: 8px;
+  padding: 9px 16px; cursor: pointer; white-space: nowrap;
+}
+.boton:hover { background: #f0f3f7; }
+.boton-principal { background: var(--azul); color: #fff; border-color: var(--azul); }
+.boton-principal:hover { background: #163d5e; }
+.boton-principal:disabled { background: #b6c3d0; border-color: #b6c3d0; cursor: default; }
+/* Fila 276: un botón apagado se ve apagado (texto gris, sin sombreado ni mano). El principal, como siempre. */
+.boton:disabled:not(.boton-principal) { color: var(--tinta-suave); cursor: default; }
+.boton:disabled:not(.boton-principal):hover { background: var(--papel); }
+.boton-peligro:disabled { border-color: var(--linea); color: var(--tinta-suave); }
+.boton-ancho { width: 100%; margin-top: 18px; padding: 12px; font-size: 15px; }
+.boton-peligro { border-color: var(--rojo-linea); color: var(--rojo-linea); }
+
+.campo {
+  font: inherit; font-size: 14px;
+  border: 1px solid var(--linea); border-radius: 8px;
+  padding: 9px 12px; width: 100%; background: var(--papel); color: var(--tinta);
+}
+.campo:focus { outline: 2px solid var(--azul-claro); border-color: var(--azul); }
+.buscar-fila { display: flex; gap: 8px; align-items: stretch; }
+.buscar-fila select { width: auto; min-width: 120px; flex: 0 0 auto; }
+.etiqueta { display: block; font-weight: 600; margin: 18px 0 7px; }
+
+/* ---------- estructura ---------- */
+#aplicacion { display: flex; min-height: 100vh; }
+
+/* Fija en pantalla: con la página larga (Ajustes con los bloques
+   abiertos, por ejemplo) antes había que bajar del todo para ver su
+   pie. Ahora se queda quieta, con su propio scroll por si algún día
+   no cupiera entera. */
+.lateral {
+  position: fixed; top: 0; left: 0;
+  width: 232px; flex: 0 0 232px;
+  height: 100vh; overflow-y: auto;
+  background: #16324e; color: #cfdcea;
+  display: flex; flex-direction: column; padding: 18px 12px;
+}
+.marca { color: #fff; font-weight: 600; font-size: 16px; padding: 6px 12px 18px; }
+.separador-lateral { height: 1px; background: rgba(255,255,255,.14); margin: 6px 4px 10px; }
+.pestana {
+  display: flex; justify-content: space-between; align-items: center;
+  font: inherit; font-size: 14px; text-align: left;
+  background: transparent; color: #cfdcea; border: 0; border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 3px; cursor: pointer; width: 100%;
+}
+.pestana:hover { background: rgba(255,255,255,.08); color: #fff; }
+.pestana.activa { background: #2c6ea8; color: #fff; font-weight: 600; }
+.cuenta { background: rgba(255,255,255,.18); border-radius: 20px; padding: 1px 8px; font-size: 12px; }
+.lateral-pie { margin-top: auto; }
+.usuario { padding: 10px 12px; font-size: 12px; color: #8fa6bd; }
+
+/* La barra ya no ocupa sitio en el flujo (está fija): el hueco se deja
+   con este margen, que barra.css cambia a 52px cuando está plegada. */
+.contenido { flex: 1; padding: 26px 32px 60px; max-width: 1180px; margin-left: 232px; }
+.cabecera {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.cabecera h2 { margin: 0; font-size: 21px; }
+.acciones { display: flex; gap: 8px; align-items: center; }
+.acciones .campo { width: 300px; }
+/* En la cabecera de asuntos abiertos caben ya cuatro cosas: si no entran,
+   que bajen de línea en vez de salirse por la derecha. */
+.cabecera .acciones { flex-wrap: wrap; justify-content: flex-end; }
+#buscar-abiertos { width: 230px; min-width: 0; }
+#filtro-estado { width: 170px; min-width: 0; }
+h3 { margin: 30px 0 8px; font-size: 16px; }
+
+/* ---------- listas ---------- */
+.lista { display: flex; flex-direction: column; gap: 8px; }
+
+/* Rótulo que encabeza cada una de las dos listas de la pantalla de
+   asuntos abiertos: arriba los documentos sueltos, abajo los asuntos.
+   Sin él, las dos listas parecían una sola. */
+.rotulo-lista {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 16px; font-weight: 600; color: var(--tinta);
+  margin: 0 0 8px;
+}
+.rotulo-icono { width: 20px; height: 20px; flex: 0 0 auto; color: var(--azul); }
+.rotulo-icono-suelto { color: #a1730a; }
+.cuenta-lista {
+  background: var(--azul-claro); border: 1px solid #c3d8ec; color: var(--azul);
+  border-radius: 20px; padding: 1px 9px; font-size: 12px; font-weight: 600;
+}
+.tarjeta {
+  background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio);
+  padding: 13px 16px; box-shadow: var(--sombra);
+  display: flex; align-items: center; gap: 16px;
+  flex-wrap: wrap;
+}
+/* Si la pantalla es estrecha, los botones bajan enteros a la línea de
+   abajo en vez de estrujar el nombre del asunto. */
+.tarjeta-texto { flex: 1 1 340px; min-width: 0; }
+.tarjeta .acciones { flex: 0 0 auto; margin-left: auto; }
+
+/* Las dos clases de fila no se pueden confundir a simple vista:
+   el asunto es una carpeta con franja azul; el documento suelto es una
+   hoja, con franja y fondo de color arena. */
+.tarjeta-icono { width: 22px; height: 22px; flex: 0 0 auto; }
+.tarjeta-asunto { border-left: 5px solid var(--azul); }
+.tarjeta-asunto .tarjeta-icono { color: var(--azul); }
+.tarjeta-suelto {
+  border-left: 5px solid var(--ambar-linea);
+  background: #fffdf4;
+  cursor: pointer;
+}
+.tarjeta-suelto:hover { background: var(--azul-claro); border-color: var(--azul); }
+.tarjeta-suelto .tarjeta-icono { color: #a1730a; }
+.tarjeta-suelto .tarjeta-nombre { font-weight: 500; }
+
+/* El documento que se está viendo en el panel de la derecha, marcado
+   en su tarjeta de la lista (17-sep-2026, fila 25): fondo y borde
+   distintos, para encontrarla sin buscar. */
+.tarjeta-abierta {
+  border-left-color: var(--azul);
+  background: var(--azul-claro);
+  box-shadow: 0 0 0 1px var(--azul), var(--sombra);
+}
+.marca-ext {
+  display: inline-block; background: #f3ede1; color: #7a5c12;
+  border: 1px solid #e3d6b8; border-radius: 5px;
+  padding: 1px 7px; font-size: 11px; font-weight: 700; margin-right: 8px;
+  letter-spacing: .3px;
+}
+.tarjeta-nombre { font-weight: 600; word-break: break-word; }
+.tarjeta-pie { color: var(--tinta-suave); font-size: 13px; margin-top: 3px; }
+.tarjeta-nota-encontrada {
+  color: var(--tinta-suave); font-size: 13px; margin-top: 3px; font-style: italic;
+}
+.tarjeta-nota-encontrada mark { font-style: normal; background: var(--azul-claro); padding: 0 2px; }
+.marca-tipo {
+  display: inline-block; background: var(--azul-claro); color: var(--azul);
+  border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 8px;
+}
+/* Fila 239: el número de asunto (A26-0137), en gris junto al tipo. */
+.marca-numero {
+  display: inline-block; color: var(--tinta-suave); border: 1px solid currentColor;
+  border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 600; margin-right: 8px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* Fila 451: «Dormido · N días», en ámbar, junto al nombre. */
+.marca-dormido {
+  display: inline-block; background: var(--ambar); color: #8a6100; border: 1px solid var(--ambar-linea);
+  border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 600; margin-left: 8px; white-space: nowrap;
+}
+/* La etiqueta de color del estado del asunto. El color sale del sitio
+   que ocupa en la lista de Ajustes, y hay seis que se van repitiendo. */
+.marca-estado {
+  display: inline-block; border-radius: 20px; padding: 2px 10px;
+  font-size: 12px; font-weight: 600; margin-right: 8px;
+  border: 1px solid transparent;
+}
+.estado-0 { background: #eef1f5; color: #4a5765; border-color: #d7dde5; }
+.estado-1 { background: #e8f0f8; color: #1f4e79; border-color: #c3d8ec; }
+.estado-2 { background: #fff4d6; color: #8a6100; border-color: #e6c377; }
+.estado-3 { background: #f0eafb; color: #5b3fa0; border-color: #d6c8f0; }
+.estado-4 { background: #fdecec; color: #a4302a; border-color: #f2c4c0; }
+.estado-5 { background: #e7f5ec; color: #1e6b3f; border-color: #bfe3cd; }
+.estado-x { background: #eef1f5; color: #5d6b7a; border-color: #d7dde5; }
+/* Quién tiene el asunto, en "Pendiente de terceros" (fila 104): en
+   pequeño y sin color, para no competir con el estado ni el plazo. */
+.marca-quien {
+  display: inline-block; border-radius: 20px; padding: 1px 8px; margin-right: 8px;
+  font-size: 11px; font-weight: 600; color: var(--tinta-suave);
+  background: var(--papel); border: 1px dashed var(--linea);
+}
+
+/* El desplegable de estado no debe ocupar los 300px de los buscadores. */
+.acciones .campo-estado { width: auto; min-width: 165px; }
+.boton-marcado { border-color: var(--azul); color: var(--azul); }
+
+.marca-categoria {
+  display: inline-block; background: #eef1f5; color: var(--tinta-suave);
+  border-radius: 20px; padding: 2px 10px; font-size: 12px; margin-right: 8px;
+}
+.vacio {
+  background: var(--papel); border: 1px dashed var(--linea); border-radius: var(--radio);
+  padding: 28px; text-align: center; color: var(--tinta-suave);
+}
+
+/* ---------- documentos sin clasificar ----------
+
+   Lo que alguien deja suelto en la carpeta de asuntos abiertos: casi
+   siempre, una tarea nueva del equipo directivo. Va arriba del todo y
+   en ámbar, para que se distinga de un asunto ya montado.
+
+   La cabecera entera es el botón de plegar, y se pliega sola cuando se
+   está buscando entre los asuntos. Aun plegada sigue diciendo si ha
+   llegado algo nuevo. */
+#bloque-sueltos { margin-bottom: 26px; }
+.sueltos-cabecera {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 8px;
+}
+
+/* ---------- las tres tarjetas de arriba ----------
+
+   Un montón de trabajo en cada una: papeles sin asunto, asuntos que nos
+   tocan y asuntos que esperan a otro. La elegida se queda marcada. */
+.paneles {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 12px; margin: 4px 0 22px;
+}
+.panel {
+  position: relative;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  font: inherit; color: var(--tinta); cursor: pointer;
+  background: var(--papel); border: 1px solid var(--linea);
+  border-radius: var(--radio); padding: 14px 16px; box-shadow: var(--sombra);
+}
+.panel:hover { border-color: #b9c6d6; }
+.panel.activo {
+  border-color: var(--azul); box-shadow: 0 0 0 2px var(--azul-claro), var(--sombra);
+}
+.panel-icono { width: 26px; height: 26px; flex: 0 0 auto; color: var(--tinta-suave); }
+.panel.activo .panel-icono { color: var(--azul); }
+.panel-texto { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.panel-nombre { font-weight: 600; font-size: 15px; }
+.panel-pie { color: var(--tinta-suave); font-size: 12px; line-height: 1.3; }
+.panel-cuenta {
+  flex: 0 0 auto; min-width: 30px; text-align: center;
+  background: #eef1f5; border: 1px solid var(--linea); color: var(--tinta);
+  border-radius: 20px; padding: 2px 10px; font-size: 14px; font-weight: 700;
+}
+.panel.activo .panel-cuenta {
+  background: var(--azul-claro); border-color: #c3d8ec; color: var(--azul);
+}
+.panel-cuenta.cuenta-ambar { background: var(--ambar); border-color: var(--ambar-linea); color: #8a6100; }
+.panel-cuenta.cuenta-roja { background: var(--rojo); border-color: var(--rojo-linea); color: var(--rojo-linea); }
+.panel .marca-nueva { position: absolute; top: -8px; right: 10px; }
+.pie-aviso { color: var(--rojo-linea); font-weight: 600; }
+.interruptor-fila { margin: 0; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .paneles { grid-template-columns: 1fr; }
+}
+.tarjeta-nueva { background: var(--ambar); border-color: var(--ambar-linea); }
+.marca-nueva {
+  display: inline-block; background: var(--ambar-linea); color: #fff;
+  border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 8px;
+}
+
+/* Quién tiene abierto este asunto ahora mismo (17-sep-2026, fila 24):
+   una letra basta, el nombre entero va en el title. */
+.marca-presencia {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--azul); color: #fff;
+  font-size: 11px; font-weight: 700; margin-right: 8px;
+}
+
+/* ---------- nuevo asunto ---------- */
+.formulario { background: var(--papel); border: 1px solid var(--linea); border-radius: 12px; padding: 22px 24px 26px; box-shadow: var(--sombra); }
+.formulario .etiqueta:first-child { margin-top: 0; }
+.tipos { display: flex; flex-wrap: wrap; gap: 7px; }
+.tipo-boton {
+  font: inherit; font-size: 13px; font-weight: 600;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 20px;
+  padding: 7px 14px; cursor: pointer;
+}
+.tipo-boton:hover { border-color: var(--azul); color: var(--azul); }
+.tipo-boton.elegido { background: var(--azul); border-color: var(--azul); color: #fff; }
+.tipo-boton:focus { outline: none; }
+.tipo-boton:focus-visible { outline: 2px solid var(--azul); outline-offset: 1px; }
+
+/* Fila 197 (docs/NUEVO-ASUNTO-PERSONA-PRIMERO.md): los dos bloques de
+   "Nuevo asunto" (persona / tipo) a la vista a la vez, lado a lado en
+   pantalla ancha; se apilan en estrecha (misma regla de .dos-paneles,
+   de más abajo). El de la persona lleva más ancho: es el que tiene
+   una lista de resultados con un botón de copiar el Nº de
+   identificación escolar (js/copiar.js) al final de la línea, y con
+   las dos columnas iguales ese botón puede quedar justo en el centro
+   de la tarjeta, el punto donde cae un clic sin más precisión. */
+/* (Fila 629: ahora son tres recuadros, en css/nuevo-asunto-simple.css.) */
+
+/* El resumen de la guía, en una línea, encima de la parrilla de tipos:
+   pulsable, despliega la guía entera (#guia-nuevo) debajo. */
+.guia-resumen {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: 13px;
+  color: var(--tinta-suave); background: #f7f9fc; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 8px 12px; margin: 8px 0; cursor: pointer;
+}
+.guia-resumen:hover { border-color: var(--azul); color: var(--azul); }
+.guia-resumen-vacia { cursor: default; }
+.guia-resumen-vacia:hover { border-color: var(--linea); color: var(--tinta-suave); }
+
+/* Sin persona elegida, la parrilla enseña todos los tipos: cada botón
+   lleva su categoría en pequeño, en un <small aria-hidden> (el nombre
+   accesible del botón sigue siendo solo el tipo). */
+.tipos-todas-categorias .tipo-boton small {
+  display: block; font-size: 10px; font-weight: 400; color: var(--tinta-suave); margin-top: 2px;
+}
+.tipos-todas-categorias .tipo-boton.elegido small { color: #cfe0ee; }
+
+/* El botón de copiar el Nº de identificación escolar (js/copiar.js),
+   dentro de un resultado del buscador único: a la derecha del todo,
+   lejos del centro de la tarjeta (donde cae un clic sin más
+   precisión, `pagina.click('...resultado')` en las pruebas), pase lo
+   que pase con el largo del nombre del grupo o del curso delante.
+   Solo aquí: en Personas (#lista-personas) se deja como está. */
+#resultados-tercero .boton-nie-chico { float: right; }
+
+/* La etiqueta de categoría de un resultado del buscador único, detrás
+   del nombre, en la misma línea (nunca "float": cambiaría el alto de
+   la tarjeta y, con él, el punto donde cae un clic en su centro —
+   justo lo que usan las pruebas con `pagina.click('...resultado')`). */
+.resultado-categoria {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  color: var(--tinta-suave); margin-left: 8px;
+}
+
+/* Fila 629: las clases de tercero, una fila de botones pequeños (antes, tarjetas grandes con su descripción). */
+.categorias { display: flex; flex-wrap: wrap; gap: 6px; }
+.categoria-boton {
+  font: inherit; font-size: 14px;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 999px;
+  padding: 5px 13px; cursor: pointer; text-align: left;
+}
+.categoria-boton:hover { border-color: var(--azul); }
+.categoria-boton.elegido { background: var(--azul); border-color: var(--azul); color: #fff; }
+
+.enlace {
+  font: inherit; font-size: inherit; background: none; border: 0; padding: 0;
+  color: var(--azul); text-decoration: underline; cursor: pointer;
+}
+.interruptor {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  background: #f7f9fc; border: 1px solid var(--linea); border-radius: 8px;
+  padding: 11px 14px; margin-top: 18px;
+}
+.interruptor input { width: 17px; height: 17px; cursor: pointer; }
+
+.resultados { max-height: 260px; overflow-y: auto; margin-top: 8px; }
+.resultado {
+  padding: 9px 12px; border: 1px solid var(--linea); border-radius: 8px;
+  margin-bottom: 5px; cursor: pointer; background: var(--papel);
+}
+.resultado:hover { background: var(--azul-claro); border-color: var(--azul); }
+.resultado-pie { color: var(--tinta-suave); font-size: 13px; }
+.elegido-caja {
+  background: var(--verde); border: 1px solid #a9d6bb; border-radius: 8px;
+  padding: 11px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+.dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pd-con-logo { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; font-weight: 600; }
+.membrete-vista-img { max-width: 100%; border: 1px solid var(--linea); background: #fff; }
+.vista-previa { background: #f7f9fc; border: 1px solid var(--linea); border-radius: 10px; padding: 15px 17px; margin-top: 22px; }
+/* El texto propio de Séneca de una plantilla de correo, plegado (fila 170). */
+.pl-seneca { margin-top: 12px; }
+.pl-seneca > summary { cursor: pointer; color: var(--tinta-suave); font-size: 13px; }
+.vista-rotulo { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--tinta-suave); margin-bottom: 6px; }
+.vista-nombre { font-family: "Consolas", "Menlo", monospace; font-size: 15px; font-weight: 600; word-break: break-word; }
+.vista-ruta { color: var(--tinta-suave); font-size: 13px; margin-top: 6px; }
+
+/* ---------- personas ---------- */
+.dos-paneles { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+.ficha { background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 18px 20px; box-shadow: var(--sombra); }
+.ficha h4 { margin: 0 0 12px; font-size: 17px; }
+.ficha-dato { display: grid; grid-template-columns: 190px 1fr; gap: 10px; padding: 5px 0; border-bottom: 1px solid #f0f3f7; font-size: 14px; }
+.ficha-dato span:first-child { color: var(--tinta-suave); }
+.ficha-dato span:last-child { word-break: break-word; }
+
+/* ---------- ajustes ---------- */
+.alta-tipo { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.fila-tipo { display: flex; align-items: center; gap: 12px; background: var(--papel); border: 1px solid var(--linea); border-radius: 8px; padding: 9px 14px; }
+.fila-tipo .nombre-tipo { font-weight: 600; flex: 1; }
+
+/* ---------- avisos y cuadros ---------- */
+.aviso { border-radius: var(--radio); padding: 14px 16px; margin-bottom: 18px; }
+.aviso p { margin: 6px 0 0; }
+.aviso-rojo { background: var(--rojo); border: 1px solid #f0b7b1; }
+.aviso-ambar { background: var(--ambar); border: 1px solid var(--ambar-linea); }
+#aviso-pendiente .boton { margin-top: 10px; }
+
+.capa { position: fixed; inset: 0; background: rgba(15,25,40,.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+.cuadro { background: var(--papel); border-radius: 12px; padding: 24px; width: 100%; max-width: 520px; box-shadow: 0 20px 60px rgba(10,25,45,.35); }
+.cuadro h3 { margin: 0 0 12px; }
+.cuadro-botones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+/* Fila 341 (docs/CUADROS-CON-BOTONES-A-LA-VISTA.md): la regla común de TODOS los cuadros. Nunca más altos que la
+   pantalla; título (y ✕) y pie de botones fijos; solo se desplaza el cuerpo. Un cuadro nuevo no pone
+   `overflow` en el cuadro entero: usa esta regla. */
+.capa > .cuadro { display: flex; flex-direction: column; max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); }
+.capa > .cuadro > h3, .capa > .cuadro > .cuadro-botones { flex: 0 0 auto; }
+.capa > .cuadro > #cuadro-cuerpo { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Los cuadros que pintan sus propios botones dentro del cuerpo: se quedan pegados abajo del cuerpo. */
+#cuadro-cuerpo .cuadro-botones { position: sticky; bottom: 0; background: var(--papel); padding: 8px 0 2px; margin-top: 12px; }
+
+.mensajes { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+/* Fila 326: los avisos suben para no tapar el botón «Soporte», y este se retira mientras haya un cuadro abierto. */
+.mensajes { bottom: 64px; }
+body:has(#capa:not(.oculto)) #soporte-boton { display: none; }
+.mensaje { background: #16324e; color: #fff; padding: 12px 18px; border-radius: 8px; box-shadow: 0 8px 24px rgba(10,25,45,.3); max-width: 380px; font-size: 14px; }
+.mensaje.malo { background: var(--rojo-linea); }
+.mensaje.bueno { background: #1e7a46; }
+.mensaje.ambar { background: var(--ambar-linea); color: #3a2a00; }
+/* El botón de un aviso («Ir al asunto», fila 119). */
+.mensaje-boton { display: inline-block; margin-left: 12px; padding: 3px 10px; border: 1px solid rgba(255,255,255,.7); border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; pointer-events: auto; }
+.mensaje-boton:hover { background: rgba(255,255,255,.15); }
+/* La ✕ de un aviso que no se borra solo (fila 449). */
+.mensaje-cerrar { margin-left: 10px; padding: 0 6px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; pointer-events: auto; opacity: .85; }
+.mensaje-cerrar:hover { opacity: 1; }
+/* Mientras hay un cuadro abierto, el aviso fijo se aparta: no tapa sus botones. */
+body:has(#capa:not(.oculto)) .mensaje-fijo { display: none; }
+
+@media (max-width: 900px) {
+  .dos-paneles, .dos-columnas { grid-template-columns: 1fr; }
+  .contenido { padding: 20px 16px 50px; }
+  .acciones .campo { width: 100%; }
+  .acciones .campo-estado { width: 100%; }
+}
+
+/* ---------- documentos ---------- */
+.lista-documentos { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; max-height: 220px; overflow-y: auto; }
+.fila-documento {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--linea); border-radius: 8px; padding: 8px 12px;
+}
+.fila-documento:hover { background: var(--azul-claro); border-color: var(--azul); }
+.nombre-documento { flex: 1; font-size: 13px; word-break: break-word; }
+.registro-campos { display: grid; grid-template-columns: 70px 1fr 1fr 110px; gap: 12px; align-items: start; }
+.opciones { display: flex; gap: 6px; flex-wrap: wrap; }
+.opcion {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--linea); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.opcion:has(input:checked) { background: var(--azul-claro); border-color: var(--azul); font-weight: 600; }
+@media (max-width: 700px) {
+  .registro-campos { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------- el visor de documentos ---------- */
+
+/* La ventana del visor ocupa casi toda la pantalla: el documento es lo que
+   hay que leer, no los campos. */
+.cuadro-ancho {
+  max-width: min(1600px, 96vw);
+  max-height: calc(100vh - 40px);
+}
+
+/* El documento se lleva dos tercios del ancho; los campos, un tercio. */
+.doc-partido {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
+  gap: 18px; align-items: start;
+}
+
+/* Con el boton "Ver mas grande" se esconden los campos y el documento
+   pasa a ocupar toda la ventana. */
+.doc-partido.solo-visor { grid-template-columns: 1fr; }
+.doc-partido.solo-visor .doc-campos { display: none; }
+
+.visor-barra { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+
+/* El documento ya no se encoge para caber entero: se enseña a todo el ancho
+   y se baja con la rueda. */
+.visor {
+  border: 1px solid var(--linea); border-radius: 10px; background: #ffffff;
+  height: calc(100vh - 250px); min-height: 380px;
+  overflow: auto;
+}
+.visor iframe { display: block; width: 100%; height: 100%; border: 0; }
+.visor img { display: block; width: 100%; height: auto; }
+.visor .explica { padding: 16px; margin: 0; }
+
+.doc-campos { max-height: calc(100vh - 250px); overflow-y: auto; padding-right: 6px; }
+.doc-campos .etiqueta:first-child { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .doc-partido { grid-template-columns: 1fr; }
+  .visor { height: 55vh; min-height: 0; }
+  .doc-campos { max-height: none; }
+}
+
+/* La etiqueta del desplegable de ordenación, en la misma línea que él. */
+.etiqueta-en-linea {
+  font-size: 13px;
+  color: #5a6472;
+  white-space: nowrap;
+}
+
+/* La pantalla "Cuentas" (fila 74, docs/CUENTAS-DE-FIN-DE-CURSO.md):
+   una tabla sencilla, nada de gráficos (lo que pide el encargo). */
+.cuentas-tabla {
+  border-collapse: collapse; width: 100%; max-width: 640px; margin: 10px 0 22px;
+  font-size: 14px;
+}
+.cuentas-tabla th, .cuentas-tabla td {
+  border-bottom: 1px solid var(--linea); padding: 6px 10px; text-align: left;
+}
+.cuentas-tabla th { color: var(--tinta-suave); font-weight: 600; }
+.cuentas-tabla td:not(:first-child):not(:nth-child(2)) { text-align: right; }
+.cuentas-total td { font-weight: 700; border-top: 2px solid var(--linea); border-bottom: none; }
+.cuentas-tabla-pequena { max-width: 320px; }
+.cuentas-subtitulo { margin: 0 0 4px; font-size: 15px; }
+
+/* Fila 96: los campos del tipo de documento, en el cuadro de poner
+   nombre y en su editor de Ajustes (js/documentos-campos.js). */
+.doc-campos-tipo { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0 12px; }
+.doccampos-fila { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.doccampos-fila .campo { flex: 1 1 160px; width: auto; }
+.doccampos-listas { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.doc-persona { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.doc-persona .csg { flex: 1 1 180px; }
+
+/* Fila 95: el camino del editor de la guía al entrar en una pregunta
+   de dentro, y la marca de un paso de opción que es una pregunta. */
+.guia-camino { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px;
+  padding: 8px 10px; border-radius: 8px; background: #f3f6f9; }
+.guia-camino-trozo { background: none; border: 0; padding: 0; color: #1f5f99; cursor: pointer; text-decoration: underline; font: inherit; }
+.guia-camino-pregunta { color: #555; font-style: italic; }
+.marca-pregunta { margin: 0 6px; padding: 1px 8px; border-radius: 10px; background: #e8eef7; color: #1f4f80; font-size: 12px; white-space: nowrap; }
+/* Fila 130: la línea ámbar de la vista previa cuando el nombre se acorta. */
+.vista-recorte { margin-top: 6px; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+
+/* Cuentas, fila 140: el número de arriba y la tabla de los abiertos más antiguos. */
+.cuentas-aviso-abiertos { margin: 0 0 12px; }
+.cuentas-aviso-ambar strong { color: var(--rojo-linea); }
+.cuentas-antiguos .cuentas-antiguo { cursor: pointer; }
+.cuentas-antiguos .cuentas-antiguo:hover td { background: var(--azul-claro); }
+
+/* Fila 248: «Qué hay de nuevo» y el número de versión pulsable. */
+.version-pulsable { cursor: pointer; text-decoration: underline dotted; }
+.version-pulsable:hover { color: #fff; }
+.novedades-lista { margin: 0 0 8px; padding-left: 18px; }
+.novedades-lista li { margin: 4px 0; }
+.novedad-fecha { font-weight: 600; margin-right: 4px; }
+#novedades-mas { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* Fila 260 (docs/SOLO-CONSULTA-EN-ESTE-ORDENADOR.md): el aviso fijo de «solo consulta» y la casilla de entrada. */
+:root { --franja-consulta-alto: 0px; }
+#franja-solo-consulta, #franja-perfil {
+  position: fixed; top: var(--franja-demo-alto, 0px); left: 0; right: 0; z-index: 69;
+  display: flex; align-items: center; justify-content: center; gap: 14px; padding: 7px 16px;
+  background: #fff4d6; color: #1b2430; font-size: 14px; border-bottom: 2px solid #e0b34a;
+}
+#franja-solo-consulta .boton { padding: 3px 10px; font-size: 12.5px; }
+body.solo-consulta { padding-top: var(--franja-consulta-alto); }
+body.solo-consulta.demo-activo { padding-top: calc(var(--franja-demo-alto, 0px) + var(--franja-consulta-alto)); }
+/* Fila 287: la línea fija de un directivo (sin botón) y lo que no ve. */
+#franja-perfil { background: #e8eef5; border-bottom-color: #9db3cc; }
+body.perfil-directivo .pestana[data-pantalla="nuevo"], body.perfil-directivo .pestana[data-pantalla="personas"], body.perfil-directivo .pestana[data-pantalla="formularios"],
+body.perfil-directivo .pestana[data-pantalla="cuentas"], body.perfil-directivo .pestana[data-pantalla="herramientas"], body.perfil-directivo .pestana[data-pantalla="ajustes"],
+body.perfil-directivo #btn-nuevo-asunto, body.perfil-directivo #inicio-tablon-hueco, body.perfil-directivo #tablon, body.perfil-directivo #inicio-fila-superior,
+body.perfil-directivo .accion-de-administracion, body.perfil-directivo .guion-soltar, body.perfil-directivo #comprobacion-marca, body.perfil-directivo .inicio-pestana:not([data-pestana="todos"]), body.perfil-directivo label.filtro:has(#filtro-organo) { display: none !important; }
+body.solo-consulta .lateral { top: var(--franja-consulta-alto); height: calc(100vh - var(--franja-consulta-alto)); }
+body.solo-consulta.demo-activo .lateral {
+  top: calc(var(--franja-demo-alto, 0px) + var(--franja-consulta-alto));
+  height: calc(100vh - var(--franja-demo-alto, 0px) - var(--franja-consulta-alto));
+}
+.solo-consulta-casilla { margin: 14px 0 0; display: flex; gap: 8px; align-items: center; }
+
+/* Con el aviso fijo arriba, lo que va a pantalla completa empieza debajo (fila 260). */
+body.solo-consulta .exportar-visor, body.solo-consulta .word-visor, body.solo-consulta #visor-lateral, body.solo-consulta #lector {
+  top: calc(var(--franja-demo-alto, 0px) + var(--franja-consulta-alto));
+}
+body.solo-consulta #lector { height: calc(100vh - var(--franja-demo-alto, 0px) - var(--franja-consulta-alto)); }
+
+/* ---------- «No cabe en el archivo» (fila 265): una caja por documento ---------- */
+.ac-lista { margin-top: 12px; }
+.ac-lista-larga { max-height: 45vh; overflow: auto; padding-right: 6px; }
+.ac-fila {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center; gap: 6px 8px; margin-bottom: 10px;
+}
+.ac-fila .ac-caja { grid-column: 2; width: 100%; }
+.ac-sub { grid-column: 1; color: var(--tinta-suave); font-size: 13px; }
+.ac-fila:not(:has(.ac-sub)) .ac-caja { grid-column: 1 / 3; }
+.ac-ext { color: var(--tinta-suave); }
+.ac-estado { font-weight: 600; white-space: nowrap; min-width: 80px; text-align: right; }
+.ac-sobra { color: var(--rojo-linea); }
+.ac-cabe { color: #15803d; }
+.ac-motivo { grid-column: 1 / -1; color: var(--rojo-linea); font-size: 13px; }
+.ac-motivo:empty { display: none; }
+/* Fila 325: la marca «hay versión nueva» junto al número de versión. */
+.marca-version { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 9px; background: #fff4d6; color: #8a5a00;
+  border: 1px solid #e0b34a; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.marca-version:hover { background: #ffe9ad; }
+
+/* Fila 364 (js/guardado-pendiente.js): el aviso fijo de «un cambio no se ha guardado todavía» y los avisos de un cambio tirado. */
+.guardado-pendiente-avisos { position: fixed; top: 0; left: 0; right: 0; z-index: 60; display: flex; flex-direction: column; pointer-events: none; }
+.guardado-pendiente-avisos > * { pointer-events: auto; }
+.guardado-pendiente-detalle { display: block; font-size: 0.8em; opacity: 0.85; }
+.archivando-fondo { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 59; padding: 3px 14px; border-radius: 12px; font-size: 0.85em; background: var(--fondo-suave, #eef2f7); color: var(--texto, #1f2933); border: 1px solid var(--borde, #c9d3df); box-shadow: 0 1px 4px rgba(0,0,0,.12); pointer-events: none; }
+.guardado-pendiente-fijo, .guardado-pendiente-cerrable { background: var(--rojo-linea); color: #fff; padding: 10px 18px; font-size: 14px; font-weight: 600; text-align: center; box-shadow: 0 2px 8px rgba(10,25,45,.3); }
+.guardado-pendiente-fijo.oculto { display: none; }
+.guardado-pendiente-cerrable { border-top: 1px solid rgba(255,255,255,.4); }
+
+/* Fila 458: «Pasar a Drive» en Ajustes → Mantenimiento (js/pasar-a-drive-ajustes.js). */
+#pasar-a-drive-ajustes progress { width: 100%; height: 14px; }
+#pasar-a-drive-ajustes .traslado-lista { margin: 6px 0 8px 20px; padding: 0; }
+#pasar-a-drive-ajustes .traslado-error { color: var(--rojo-linea); }
+#pasar-a-drive-ajustes .traslado-aviso { background: var(--ambar); border: 1px solid var(--ambar-linea); border-radius: 6px; padding: 6px 10px; }
+#pasar-a-drive-ajustes .traslado-titulo, #pasar-a-drive-ajustes .traslado-final { font-weight: 600; }
+
+/* Fila 459: la franja de la entrada tras «Pasar a Drive» (js/carpetas-en-drive.js). */
+.franja-drive-nuevas { background: var(--ambar); border: 1px solid var(--ambar-linea); border-radius: 6px; padding: 8px 12px; margin: 10px 0; }
+.franja-drive-nuevas p { margin: 0 0 6px; }
+.franja-drive-nuevas .franja-drive-texto { font-weight: 600; }
+.franja-drive-nuevas .franja-drive-error { color: var(--rojo-linea); }
+.franja-drive-nuevas .franja-drive-ruta code { word-break: break-all; }
+
+/* Fila 493: «Clases de tercero» en los Ajustes de un tipo, y la línea «admite» de Nuevo asunto. */
+.tipo-clases-fila { align-items: flex-start; }
+.tipo-clases-casillas { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.tipo-clases-casilla { display: inline-flex; align-items: center; gap: 4px; }

@@ -1,0 +1,262 @@
+/* ============================================================
+   word-visor.js — el Word, en grande dentro de la aplicación
+   (25-sep-2026, fila 155, docs/WORD-DENTRO-DE-LA-APP.md, parte B).
+
+   Antes, pulsar un .docx lo mandaba a Descargas con un nombre de
+   letras y números (un `blob:` abierto fuera). Ahora se abre aquí, en
+   una capa a pantalla completa, con tres botones:
+
+     - «Guardar PDF»: un PDF con el mismo nombre en la carpeta del
+       asunto (pregunta antes de sustituir uno que ya esté); si el Word
+       viene de un hito, el PDF queda apuntado en ese hito, con su nota.
+     - «Imprimir»: el cuadro de imprimir del navegador, solo con las
+       páginas del documento.
+     - «Cerrar» (y Escape).
+
+   Se ve, no se edita: corregir el Word dentro de la aplicación («Guardar
+   cambios») quedó BLOQUEADO (fila 165 de docs/COLA.md).
+
+   Todo en el navegador, sin internet: las librerías van en `js/lib/`
+   (docx-preview, Apache-2.0; JSZip, MIT; html2canvas, MIT; pdf-lib, la
+   que ya estaba) y se cargan al abrir el primer Word, igual que
+   js/pdf-herramientas.js carga pdf-lib. El PDF es una imagen de cada
+   página a 200 ppp (sin texto seleccionable), que AutoFirma firma igual.
+
+   `WordVisor.abrir({ blob | handle, nombre, carpeta, asunto, hito })`.
+   Lo llaman js/visor.js (un .docx) y js/plantillas-documento.js (el
+   Word recién generado).
+   ============================================================ */
+var WordVisor = (function () {
+
+  var PPP = 200;
+  var capa = null;
+  var actual = null;   /* { blob, nombre, carpeta, asunto, hito } */
+  var cargas = {};
+
+  function cargarScript(ruta, global) {
+    if (window[global]) return Promise.resolve(window[global]);
+    if (cargas[ruta]) return cargas[ruta];
+    cargas[ruta] = new Promise(function (resolver, rechazar) {
+      var s = document.createElement('script');
+      s.src = ruta;
+      s.onload = function () { resolver(window[global]); };
+      s.onerror = function () { delete cargas[ruta]; rechazar(new Error('No se ha podido cargar ' + ruta + '.')); };
+      document.head.appendChild(s);
+    });
+    return cargas[ruta];
+  }
+
+  async function librerias() {
+    await cargarScript('js/lib/jszip.min.js', 'JSZip');
+    return cargarScript('js/lib/docx-preview.min.js', 'docx');
+  }
+
+  var OPCIONES_DE_PINTADO = {
+    className: 'docx', inWrapper: true, ignoreWidth: false, ignoreHeight: false, breakPages: true,
+    ignoreLastRenderedPageBreak: true, renderHeaders: true, renderFooters: true, useBase64URL: true
+  };
+
+  /* Fila 280 («Convertir en plantilla»): pintar un Word en cualquier contenedor, sin la capa del visor. */
+  async function pintarEn(contenedor, blob) {
+    var docx = await librerias();
+    contenedor.innerHTML = '';
+    await docx.renderAsync(blob, contenedor, null, OPCIONES_DE_PINTADO);
+  }
+
+  function construir() {
+    if (capa) return;
+    capa = document.createElement('div');
+    capa.id = 'word-visor';
+    capa.className = 'word-visor oculto';
+    capa.innerHTML =
+      '<div class="word-visor-barra">' +
+        '<button type="button" class="boton word-visor-volver" data-ayuda-clave="volver-lista-documentos">← Carpeta</button>' +   /* fila 425: solo dentro de «Trabajo» */
+        '<span class="word-visor-nombre"></span>' +
+        '<span class="word-visor-ruta"></span>' +
+        '<span class="word-visor-botones">' +
+          '<button type="button" class="boton boton-principal word-visor-pdf">Guardar PDF</button>' +
+          '<button type="button" class="boton word-visor-imprimir">Imprimir</button>' +
+          '<button type="button" class="boton word-visor-cerrar">Cerrar</button>' +
+        '</span>' +
+      '</div>' +
+      '<div class="word-visor-hoja"><p class="explica">Abriendo…</p></div>';
+    document.body.appendChild(capa);
+    capa.querySelector('.word-visor-cerrar').onclick = cerrar;
+    capa.querySelector('.word-visor-volver').onclick = cerrar;
+    capa.querySelector('.word-visor-imprimir').onclick = imprimir;
+    capa.querySelector('.word-visor-pdf').onclick = function (ev) { guardarPdf(ev.currentTarget); };
+  }
+
+  async function abrir(op) {
+    construir();
+    var blob = op.blob;
+    try { if (!blob && op.handle) blob = await op.handle.getFile(); }
+    catch (e) { U.fallo('No he podido abrir el documento', e); return; }
+    actual = { blob: blob, nombre: op.nombre || (blob && blob.name) || 'documento.docx', carpeta: op.carpeta || null,
+               asunto: op.asunto || null, hito: op.hito || null, alCerrar: op.alCerrar || null, soloVer: !!op.soloVer };
+    capa.querySelector('.word-visor-nombre').textContent = actual.nombre;
+    /* Fila 423: «Ruta» junto al nombre, solo si el Word es un documento de un asunto (lo dice quien lo abre). */
+    var lugarRuta = capa.querySelector('.word-visor-ruta');
+    lugarRuta.innerHTML = '';
+    if (op.rutaDe && actual.asunto && window.RutaCarpetas) {
+      lugarRuta.appendChild(RutaCarpetas.botonDocumento(actual.asunto, op.rutaDe.modo, { nombre: actual.nombre, subcarpeta: op.rutaDe.subcarpeta }));
+    }
+    capa.querySelector('.word-visor-pdf').disabled = !actual.carpeta;
+    capa.querySelector('.word-visor-pdf').classList.toggle('oculto', actual.soloVer);   /* fila 320: una plantilla se mira, no hay asunto donde guardar el PDF */
+    capa.querySelector('.word-visor-pdf').title = actual.carpeta ? '' : 'Ábrelo desde la ficha del asunto para guardar el PDF en su carpeta';
+    var hoja = capa.querySelector('.word-visor-hoja');
+    hoja.innerHTML = '<p class="explica">Abriendo…</p>';
+    capa.classList.remove('oculto');
+    document.body.classList.add('con-word-visor');
+    if (window.FichaTrabajoVisor) FichaTrabajoVisor.alAbrir();   /* fila 425: en la columna derecha de «Trabajo» */
+    try {
+      var docx = await librerias();
+      hoja.innerHTML = '';
+      await docx.renderAsync(blob, hoja, null, OPCIONES_DE_PINTADO);
+    } catch (e) {
+      hoja.innerHTML = '<p class="explica">No he podido enseñar este Word: ' + U.escapar(U.mensajeDeError(e)) + '</p>';
+    }
+  }
+
+  function abierto() { return !!(capa && !capa.classList.contains('oculto')); }
+
+  function cerrar() {
+    if (!capa) return;
+    capa.classList.add('oculto');
+    document.body.classList.remove('con-word-visor');
+    if (window.FichaTrabajoVisor) FichaTrabajoVisor.ubicar();   /* fila 425: otra vez la lista de la carpeta */
+    capa.querySelector('.word-visor-hoja').innerHTML = '';
+    var f = capa.querySelector('.word-visor-franja');
+    if (f) f.remove();
+    var alCerrar = actual && actual.alCerrar;
+    actual = null;
+    if (alCerrar) { try { alCerrar(); } catch (e) { /* un aviso de más o de menos */ } }   /* fila 294: la muestra de «Generar para todos» */
+  }
+
+  function cerrarSiAbierto() {
+    if (!abierto()) return false;
+    cerrar();
+    return true;
+  }
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && abierto() && !document.querySelector('#capa:not(.oculto)')) { ev.stopPropagation(); cerrar(); }
+  }, true);
+
+  function imprimir() { window.print(); }
+
+  function paginas() {
+    var hoja = capa && capa.querySelector('.word-visor-hoja');
+    return hoja ? Array.prototype.slice.call(hoja.querySelectorAll('section.docx')) : [];
+  }
+
+  function nombrePdf(nombre) { return String(nombre).replace(/\.docx?$/i, '') + '.pdf'; }
+
+  /* Cada página, como imagen a 200 ppp, en un PDF con su tamaño en puntos.
+     Fila 294: `hacerPdfDe(lista, opciones)` vale para cualquier lista de páginas (la del visor o la de un contenedor
+     fuera de la vista). Con `opciones.referencia`, cada página lleva ese texto de verdad, en pequeño, en vertical en el
+     margen izquierdo (por encima de la banda de la firma y por debajo de la del sello, docs/HUECO-PARA-SELLO-Y-FIRMA.md). */
+  async function hacerPdfDe(lista, opciones) {
+    var html2canvas = await cargarScript('js/lib/html2canvas.min.js', 'html2canvas');
+    var PDFLib = await cargarScript('js/lib/pdf-lib.min.js', 'PDFLib');
+    var pdf = await PDFLib.PDFDocument.create();
+    if (!lista.length) throw new Error('El documento no tiene páginas que guardar.');
+    var referencia = opciones && opciones.referencia;
+    var letra = referencia ? await pdf.embedFont(PDFLib.StandardFonts.Helvetica) : null;
+    for (var i = 0; i < lista.length; i++) {
+      var el = lista[i];
+      var lienzo = await html2canvas(el, { scale: PPP / 96, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      var bytes = await new Promise(function (r) { lienzo.toBlob(function (b) { r(b.arrayBuffer()); }, 'image/jpeg', 0.92); });
+      lienzo.width = lienzo.height = 0;   /* suelta la memoria del lienzo antes del siguiente */
+      var img = await pdf.embedJpg(await bytes);
+      var ancho = el.offsetWidth * 0.75, alto = el.offsetHeight * 0.75;
+      var pagina = pdf.addPage([ancho, alto]);
+      pagina.drawImage(img, { x: 0, y: 0, width: ancho, height: alto });
+      if (referencia) {
+        pagina.drawText(String(referencia), { x: 12, y: Math.min(82, alto * 0.2), size: 7, font: letra,
+          color: PDFLib.rgb(0.45, 0.45, 0.45), rotate: PDFLib.degrees(90) });
+      }
+      if (lista.length > 1) await new Promise(function (r) { setTimeout(r, 0); });   /* cede el paso al navegador */
+    }
+    return new Blob([await pdf.save()], { type: 'application/pdf' });
+  }
+
+  function hacerPdf() { return hacerPdfDe(paginas()); }
+
+  /* Fila 294: el PDF de un Word sin enseñar el visor. El Word se pinta en un contenedor fuera de la vista, con las mismas
+     clases que la hoja del visor (mismo corte de páginas), y se quita al acabar. */
+  async function pdfDe(blob, opciones) {
+    var docx = await librerias();
+    var fuera = document.createElement('div');
+    fuera.className = 'word-visor-hoja word-visor-fuera';
+    fuera.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(fuera);
+    try {
+      await docx.renderAsync(blob, fuera, null, OPCIONES_DE_PINTADO);
+      return await hacerPdfDe(Array.prototype.slice.call(fuera.querySelectorAll('section.docx')), opciones);
+    } finally { fuera.remove(); }
+  }
+
+  async function yaExiste(carpeta, nombre) {
+    try { await carpeta.getFileHandle(nombre); return true; } catch (e) { return false; }
+  }
+
+  /* Devuelve si el PDF se ha guardado. `opciones.sinCerrar` (fila 285): el visor se queda abierto. */
+  async function guardarPdf(boton, opciones) {
+    if (!actual || !actual.carpeta) return false;
+    var nombre = nombrePdf(actual.nombre);
+    var mismo = actual;
+    if (await yaExiste(mismo.carpeta, nombre)) {
+      var ok = await U.preguntar('Ya hay un PDF con ese nombre',
+        '<p>En la carpeta ya está «' + U.escapar(nombre) + '». ¿Lo sustituyo por este?</p>', 'Sustituirlo');
+      if (!ok) return false;
+    }
+    try {
+      await U.mientrasGuarda(boton, async function () {
+        var blob = await hacerPdf();
+        var h = await mismo.carpeta.getFileHandle(nombre, { create: true });
+        var w = await h.createWritable();
+        await w.write(blob);
+        await w.close();
+        if (window.RutaCopia) await RutaCopia.alEscribir(mismo.carpeta, nombre);   /* fila 478 */
+      });
+    } catch (e) { U.fallo('No he podido guardar el PDF', e); return false; }
+    U.aviso('PDF guardado en la carpeta del asunto: ' + nombre, 'bueno');
+    /* Fila 160: con su PDF, el Word pasa a «Versiones previas». */
+    if (window.VersionesPrevias) await VersionesPrevias.ordenarTrasCambio(mismo.carpeta);
+    if (mismo.asunto && window.FichaDocumentos && App.fichaAbierta && App.fichaAbierta() === mismo.asunto.nombre) {
+      try { FichaDocumentos.pintar(mismo.asunto); } catch (e) { /* solo pintar */ }
+    }
+    try {
+      if (mismo.asunto && window.Notas && !(mismo.hito && window.Hitos)) await Notas.anadirAuto(mismo.asunto, 'PDF guardado ' + nombre);
+      if (mismo.asunto && mismo.hito && window.Hitos) {
+        await Hitos.anadirDocumento(mismo.asunto.nombre, mismo.hito.id, nombre);
+        await Hitos.anadirNota(mismo.asunto.nombre, mismo.hito.id, 'PDF guardado «' + nombre + '»');
+        if (window.HitosPanel) HitosPanel.programarRepintado();
+      }
+    } catch (e) { U.accesorio('PDF guardado, pero no he podido apuntarlo', e); }
+    /* Fila 173, punto 7: guardado ya el PDF, se vuelve a la mesa del
+       hito sin tener que pulsar "Cerrar". Si algo principal ha fallado
+       arriba, ya se ha salido antes con `return` y el visor sigue abierto. */
+    if (!(opciones && opciones.sinCerrar)) cerrar();
+    return true;
+  }
+
+  /* Fila 285: una franja verde bajo la barra del visor (la quita `cerrar`). */
+  function franja(texto) {
+    if (!capa) return;
+    var f = capa.querySelector('.word-visor-franja');
+    if (!f) {
+      f = document.createElement('div');
+      f.className = 'word-visor-franja aviso aviso-verde';
+      capa.insertBefore(f, capa.querySelector('.word-visor-hoja'));
+    }
+    f.textContent = texto;
+    return f;
+  }
+
+  return { abrir: abrir, cerrar: cerrar, cerrarSiAbierto: cerrarSiAbierto, abierto: abierto,
+           nombrePdf: nombrePdf, hacerPdf: hacerPdf, pdfDe: pdfDe, pintarEn: pintarEn,
+           guardarPdfAhora: function (opciones) { return guardarPdf(null, opciones); }, franja: franja };
+})();
+window.WordVisor = WordVisor;

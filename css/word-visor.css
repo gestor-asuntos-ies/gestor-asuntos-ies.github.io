@@ -1,0 +1,45 @@
+/* ============================================================
+   word-visor.css — el Word, en grande dentro de la aplicación
+   (fila 155, js/word-visor.js). Una capa a pantalla completa, con la
+   barra de arriba (nombre y botones) siempre a la vista.
+   ============================================================ */
+.word-visor { position: fixed; inset: 0; z-index: 45; display: flex; flex-direction: column; background: #e9edf2; }
+.word-visor.oculto { display: none; }
+.word-visor-barra { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #d7dde5; }
+.word-visor-nombre { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.word-visor-botones { display: flex; gap: 8px; flex: 0 0 auto; }
+.word-visor-hoja { flex: 1 1 auto; overflow: auto; padding: 16px; }
+.word-visor-hoja .docx-wrapper { background: transparent; padding: 0; }
+.word-visor-hoja section.docx { box-shadow: 0 1px 4px rgba(0, 0, 0, .18); margin: 0 auto 16px; }
+/* Un Word sin tamaño de página ni márgenes (las plantillas del centro no los traen): los de Word en
+   España, A4 con 2,5 cm arriba y abajo y 3 cm a los lados. */
+.word-visor-hoja section.docx:not([style*="padding"]) { width: 210mm; min-height: 297mm; padding: 2.5cm 3cm; box-sizing: border-box; }
+body.con-word-visor { overflow: hidden; }
+/* Fila 294: el Word pintado fuera de la vista para sacar su PDF (WordVisor.pdfDe): mismo ancho que la hoja del visor. */
+.word-visor-hoja.word-visor-fuera { position: fixed; left: -100000px; top: 0; width: 100vw; flex: none; overflow: visible; }
+/* Fila 294: la franja de la muestra de «Generar para todos», con sus botones. */
+.word-visor-franja .franja-botones { display: inline-flex; gap: 8px; margin-left: 12px; vertical-align: middle; }
+
+/* Imprimir: solo las páginas del Word. */
+@media print {
+  body.con-word-visor > *:not(#word-visor) { display: none !important; }
+  body.con-word-visor #word-visor { position: static; background: #fff; display: block; }
+  body.con-word-visor .word-visor-barra { display: none; }
+  body.con-word-visor .word-visor-hoja { overflow: visible; padding: 0; }
+  body.con-word-visor .word-visor-hoja section.docx { box-shadow: none; margin: 0; page-break-after: always; }
+  @page { margin: 0; }
+}
+
+/* Fila 423: el botón «Ruta» junto al nombre del documento. */
+.word-visor-ruta { flex: 0 0 auto; }
+.word-visor-ruta:empty { display: none; }
+
+/* Fila 425 (docs/FICHA-VISTA-DE-TRABAJO.md): el Word, dentro de la columna derecha de «Trabajo»
+   (js/ficha-trabajo-visor.js), en lugar de la lista de documentos. */
+.word-visor-volver { display: none; flex: 0 0 auto; }
+.word-visor.en-trabajo {
+  position: relative; inset: auto; z-index: auto;
+  border: 1px solid var(--linea); border-radius: var(--radio); overflow: hidden;
+}
+.word-visor.en-trabajo .word-visor-volver { display: inline-block; }
+body.con-word-visor.visor-en-trabajo { overflow: auto; }

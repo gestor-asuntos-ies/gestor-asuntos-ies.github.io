@@ -1,0 +1,329 @@
+/* ============================================================
+   tablas-datos.js — las tablas de datos y los huecos que traen datos
+   de ellas (24-sep-2026, fila 110, docs/TABLAS-DE-DATOS.md).
+
+   Tablas que la aplicación lee de la carpeta de datos, unidas a la
+   persona por su DNI (los dígitos, como `clavePersona` de js/datos.js):
+
+   - TUTORIAS: las fichas de tutorías que deja el Centro de datos
+     (`TUTORIAS-HECHO <curso>.json`), leídas por js/tablas-datos-tutorias.js
+     (fila 376: ya no se lee el PDF de Séneca).
+   - PROFESORADO: no se lee otra vez, sale de `Datos` (los RelPerCen).
+   - Cualquier CSV o Excel de la subcarpeta `Tablas`: una tabla por
+     fichero, con su cabecera tal cual.
+
+   Huecos de plantilla (js/plantillas.js los enseña en su catálogo):
+   {{ESPECIALIDAD}}, {{TABLA TUTORIAS}}, {{DATO <tabla>: <columna>}} y
+   {{TABLA <tabla>: <col1> | <col2> | …}}. `prepararDocumento` los
+   resuelve antes de `Docx.rellenar` (lo llama js/plantillas-documento.js);
+   lo que no tiene dato sale «[falta: …]» en amarillo y entra en «faltan».
+
+   Además: el bloque «Tablas de datos» de Ajustes → Mantenimiento (solo
+   lectura) y el plegable «Datos de las tablas» de la ficha del tercero.
+   ============================================================ */
+var TablasDatos = (function () {
+
+  var CACHE = null;   /* { tablas: { NOMBRE: { nombre, ficheros, cursos, cabecera, filas } }, errores: [] } */
+  var L = window.TablasDatosLeer;
+  /* Fila 123: como el certificado del centro. Los nombres viejos (Curso
+     escolar, Grupo, Desde, Hasta) siguen valiendo en {{TABLA TUTORIAS: …}}. */
+  var COLUMNAS_TUTORIAS = ['Cargo', 'Curso', 'Toma de posesión', 'Cese'];
+  var GRUPO_DIVERSIDAD = 'pedagogia terapeutica';
+
+  function dirDatos() { return window.App && App.E && App.E.datos; }
+  function nombreTabla(n) { return U.normalizar(String(n || '')).replace(/\.(csv|xlsx)$/i, '').replace(/[^a-z0-9]+/g, ' ').trim().toUpperCase(); }
+  function fechaLegible(iso) { var p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
+
+  async function leerBytes(dir, nombre) {
+    var h = await dir.getFileHandle(nombre);
+    return new Uint8Array(await (await h.getFile()).arrayBuffer());
+  }
+
+  /* ---------- leer todo (con caché) ---------- */
+
+  async function cargar(forzar) {
+    if (CACHE && !forzar) {
+      /* Fila 311: la tabla de actividades sale del registro, que cambia sin tocar la carpeta de datos: se lee otra vez. */
+      if (window.ActividadesTabla) { delete CACHE.tablas[ActividadesTabla.NOMBRE]; await ActividadesTabla.comoTabla(CACHE); }
+      return CACHE;
+    }
+    var salida = { tablas: {}, errores: [] };
+    var dir = dirDatos();
+    if (!dir) return (CACHE = salida);
+    var lista = [];
+    try { lista = await Carpetas.ficheros(dir); } catch (e) { lista = []; }
+
+    /* Fila 376: las tutorías salen solo de las fichas del Centro de datos (js/tablas-datos-tutorias.js), todos los
+       cursos que traigan. Un PDF de función tutorial suelto no se lee: si su curso falta, un aviso ámbar. */
+    var tut = await TablasDatosTutorias.leer(dir, lista, COLUMNAS_TUTORIAS);
+    if (tut.tabla) salida.tablas.TUTORIAS = tut.tabla;
+    tut.errores.forEach(function (e) { salida.errores.push(e); });
+
+    var sub = null;
+    try { sub = await dir.getDirectoryHandle('Tablas'); } catch (e) { sub = null; }
+    /* Fila 238: los CSV del Consejo Escolar, de la carpeta de datos y de Tablas. */
+    await cargarConsejo(salida, dir, lista, sub);
+    if (sub) {
+      var enSub = [];
+      try { enSub = await Carpetas.ficheros(sub); } catch (e) { enSub = []; }
+      for (var j = 0; j < enSub.length; j++) {
+        var f2 = enSub[j].nombre;
+        if (!/\.(csv|xlsx)$/i.test(f2)) continue;
+        if (window.TablasDatosConsejo && TablasDatosConsejo.esFicheroDelConsejo(f2)) continue;   /* fila 238 */
+        try {
+          var t = /\.csv$/i.test(f2) ? L.deCsv(await Carpetas.leerTexto(sub, f2)) : await L.deXlsx(await leerBytes(sub, f2));
+          if (!t.cabecera.length) throw new Error('Está vacío.');
+          salida.tablas[nombreTabla(f2)] = { nombre: nombreTabla(f2), ficheros: [f2], cursos: [], cabecera: t.cabecera,
+            filas: t.filas, columnaDni: t.columnaDni };
+          if (!t.columnaDni) salida.errores.push({ fichero: f2, motivo: 'No encuentro la columna del DNI: la tabla se lee, pero no se puede unir a nadie.' });
+        } catch (e) { salida.errores.push({ fichero: f2, motivo: U.mensajeDeError(e) }); }
+      }
+    }
+    /* Filas 142 y 144: las tablas «ALUMNADO BD…» (unidas por Nº escolar). */
+    if (window.AlumnadoBDVer) { try { await AlumnadoBDVer.comoTabla(salida); } catch (e) { salida.errores.push({ fichero: 'ALUMNADO-BD.json', motivo: U.mensajeDeError(e) }); } }
+    /* Fila 311: ACTIVIDADES EXTRAESCOLARES, del registro de actividades (js/actividades-tabla.js). */
+    if (window.ActividadesTabla) { try { await ActividadesTabla.comoTabla(salida); } catch (e) { salida.errores.push({ fichero: 'actividades.json', motivo: U.mensajeDeError(e) }); } }
+    CACHE = salida;
+    return salida;
+  }
+
+  /* Fila 238 (js/tablas-datos-consejo.js): una sola tabla, CONSEJO ESCOLAR, con todos los ficheros. */
+  async function cargarConsejo(salida, dir, listaDatos, sub) {
+    var C = window.TablasDatosConsejo;
+    if (!C) return;
+    var cand = [];
+    listaDatos.forEach(function (f) { if (C.esFicheroDelConsejo(f.nombre)) cand.push({ dir: dir, nombre: f.nombre }); });
+    if (sub) {
+      var enSub = [];
+      try { enSub = await Carpetas.ficheros(sub); } catch (e) { enSub = []; }
+      enSub.forEach(function (f) { if (C.esFicheroDelConsejo(f.nombre)) cand.push({ dir: sub, nombre: f.nombre }); });
+    }
+    var leidos = [];
+    for (var i = 0; i < cand.length; i++) {
+      try {
+        var r = C.leerTexto(await Carpetas.leerTexto(cand[i].dir, cand[i].nombre), cand[i].nombre);
+        if (!r.ok) throw new Error(r.motivo);
+        leidos.push({ fichero: cand[i].nombre, periodo: r.periodo, filas: r.filas });
+      } catch (e) { salida.errores.push({ fichero: cand[i].nombre, motivo: U.mensajeDeError(e) }); }
+    }
+    if (!leidos.length) return;
+    var u = C.unir(leidos);
+    salida.tablas[C.NOMBRE_TABLA] = { nombre: C.NOMBRE_TABLA, ficheros: leidos.map(function (x) { return x.fichero; }),
+      cursos: u.periodos, cabecera: C.COLUMNAS, filas: u.filas };
+    u.avisos.forEach(function (a) { salida.errores.push({ fichero: 'Consejo Escolar', motivo: a }); });
+  }
+
+  function olvidar() { CACHE = null; }
+
+  /* [{ nombre, ficheros, cursos, filas }] y los errores. */
+  async function lista() {
+    var d = await cargar();
+    var tablas = Object.keys(d.tablas).map(function (k) {
+      var t = d.tablas[k];
+      return { nombre: t.nombre, ficheros: t.ficheros, cursos: t.cursos, filas: t.filas.length, origen: t.origen || '' };
+    });
+    return { tablas: tablas, errores: d.errores };
+  }
+
+  /* ---------- las filas de una persona ---------- */
+
+  /* Con el documento entero, por sus dígitos; si solo se tienen los 4
+     últimos caracteres, por esos 4 y el nombre normalizado. */
+  function esDeLaPersona(fila, persona) {
+    if (fila.idEscolar) return !!persona && String(persona.idEscolar || persona.id || '').trim() === fila.idEscolar;
+    /* Fila 238: el Consejo Escolar se une por el nombre (Séneca no da el DNI). */
+    if (fila.claveNombre) return !!persona && TablasDatosConsejo.claveNombre(persona.nombre) === fila.claveNombre;
+    var doc = String((persona && (persona.documento || persona.dni)) || '');
+    var clave = L.clave(doc);
+    if (clave.length > 4) return fila.clave === clave;
+    var ultimos = doc.replace(/\s+/g, '').slice(-4).toUpperCase();
+    if (!ultimos) return false;
+    var dniFila = String(fila.dni || '').toUpperCase();
+    var nombreFila = U.normalizar(fila.nombre || (fila.celdas && Object.values(fila.celdas).join(' ')) || '');
+    return dniFila.slice(-4) === ultimos && nombreFila.indexOf(U.normalizar((persona.nombre || '').split(',')[0])) !== -1;
+  }
+
+  async function filasDe(nombre, persona) {
+    var d = await cargar();
+    var t = d.tablas[nombreTabla(nombre)];
+    if (!t || !persona) return [];
+    return t.filas.filter(function (f) { return esDeLaPersona(f, persona); })
+      .sort(function (a, b) { return (a.orden ? String(a.orden).localeCompare(String(b.orden || '')) : 0) || String(a.curso || '').localeCompare(String(b.curso || '')) || String(a.desde || '').localeCompare(String(b.desde || '')); });
+  }
+
+  /* Una fila como lista de celdas, con las columnas pedidas. */
+  function celdasDe(tabla, fila, columnas, ctx) {
+    if (tabla === 'CONSEJO ESCOLAR') return TablasDatosConsejo.celdas(fila, columnas, ctx);   /* fila 238 */
+    if (window.ActividadesTabla && tabla === ActividadesTabla.NOMBRE) return ActividadesTabla.celdas(fila, columnas);   /* fila 311 */
+    if (tabla === 'TUTORIAS') {
+      var desde = fechaLegible(fila.desde), hasta = fechaLegible(fila.hasta);
+      var mapa = { 'curso escolar': fila.curso, 'curso': String(fila.curso || '').replace('/', '-'), 'grupo': fila.grupo,
+                   'cargo': cargoDe(fila.grupo), 'desde': desde, 'toma de posesion': desde, 'hasta': hasta, 'cese': hasta,
+                   'nombre': fila.nombre, 'dni': fila.dni };
+      return columnas.map(function (c) { return mapa[U.normalizar(c)] || ''; });
+    }
+    return columnas.map(function (c) {
+      var real = Object.keys(fila.celdas).filter(function (k) { return U.normalizar(k) === U.normalizar(c); })[0];
+      return real ? fila.celdas[real] : '';
+    });
+  }
+
+  /* «Tutoría 4º ESO C»; en el bloque de atención a la diversidad (sin
+     unidad), «Tutoría de Pedagogía Terapéutica, …» (fila 123). */
+  function cargoDe(grupo) {
+    var g = String(grupo || '').trim();
+    if (!g) return 'Tutoría';
+    return U.normalizar(g).indexOf(GRUPO_DIVERSIDAD) === 0 ? 'Tutoría de ' + g : 'Tutoría ' + g;
+  }
+
+  /* «Cursos que pide» (campo propio del tipo, fila 123): solo los periodos
+     de esos cursos. Vacío, todos; sin entenderlo, todos y un aviso. */
+  function filtrarPorCursos(filas, valores, faltan) {
+    var escrito = '';
+    var campos = (valores && valores.campos) || {};
+    Object.keys(campos).forEach(function (k) { if (U.normalizar(k) === 'cursos que pide') escrito = campos[k]; });
+    var pedido = window.TablasDatosCursos ? TablasDatosCursos.entender(escrito) : null;
+    if (!pedido) return filas;
+    if (!pedido.entendido) {
+      faltan.push('Cursos que pide: no entiendo «' + escrito + '», salen todos los cursos');
+      return filas;
+    }
+    return filas.filter(function (f) { return pedido.anios.indexOf(TablasDatosCursos.anioDe(f.curso)) !== -1; });
+  }
+
+  /* ---------- los huecos de un documento ---------- */
+
+  /* La persona del asunto (el tercero), la misma que busca la ficha. */
+  async function personaDelAsunto(asunto) {
+    if (!window.FichaTercero || !FichaTercero.datosBasicos) return null;
+    try { return (await FichaTercero.datosBasicos(asunto)).persona; } catch (e) { return null; }
+  }
+
+  /* Lee qué huecos de tabla trae la plantilla, mete las tablas en su
+     sitio (Docx.ponerTabla) y deja en `valores` lo que va en texto
+     (`especialidad`, `datosTablas`). Devuelve { buffer, faltan }. */
+  async function prepararDocumento(buffer, asunto, valores) {
+    var texto = await Docx.textoDelDocumento(buffer);
+    var huecos = [];
+    texto.replace(/\{\{\s*(ESPECIALIDAD(?:\s+FIRMANTE|\s+VISTO\s+BUENO)?|TABLA[^{}]*|DATO[^{}]*|ACTIVIDADES\s+PERIODO)\s*\}\}/gi, function (t, dentro) { huecos.push(dentro.trim()); });
+    if (!huecos.length) return { buffer: buffer, faltan: [] };
+
+    var persona = await personaDelAsunto(asunto);
+    var faltan = [];
+    var bloqueo = '', libros = null;
+    valores.datosTablas = valores.datosTablas || {};
+
+    for (var i = 0; i < huecos.length; i++) {
+      var h = huecos[i];
+      /* Fila 501 (js/libros-ficha.js): la ficha de entrega de libros. Si no se puede hacer, `bloqueo` lo dice y no se genera. */
+      if (window.LibrosFicha && /^(tabla|dato)\s+libros\b/i.test(h)) {
+        libros = libros || await LibrosFicha.contexto(persona || await LibrosFicha.personaDeAsunto(asunto), valores, LibrosFicha.esGrupoDe(asunto));
+        delete valores.sexos;   /* «matriculado/a», «tutor/a» y «padre/madre» de la ficha se quedan tal cual: no son del sexo del alumno */
+        if (libros.avisos.length) { bloqueo = libros.avisos.join(' '); continue; }
+        var delLibro = LibrosFicha.hueco(h, libros);
+        if (!delLibro) continue;
+        if (delLibro.tabla) buffer = (await Docx.ponerTabla(buffer, h, delLibro.tabla.cabecera, delLibro.tabla.filas)).bytes;
+        else valores.datosTablas[U.normalizar(h)] = delLibro.texto;
+        continue;
+      }
+      if (/^especialidad$/i.test(h)) {
+        var esp = await especialidadDe(persona);
+        if (!esp) { faltan.push('Especialidad'); esp = Docx.MARCA_FALTA('Especialidad'); }
+        valores.especialidad = esp;
+        continue;
+      }
+      /* {{ESPECIALIDAD FIRMANTE}} / {{ESPECIALIDAD VISTO BUENO}} (fila 123):
+         el puesto de quien ocupa el cargo en la fecha del documento. */
+      var deCargo = h.match(/^especialidad\s+(firmante|visto\s+bueno)$/i);
+      if (deCargo) {
+        var quien = /^firmante$/i.test(deCargo[1]) ? 'firmante' : 'visto bueno';
+        var etiquetaCargo = quien === 'firmante' ? 'Especialidad de quien firma' : 'Especialidad del visto bueno';
+        var espCargo = await especialidadPorNombre(valores[quien], valores[quien + ' documento']);
+        if (!espCargo) { faltan.push(etiquetaCargo); espCargo = Docx.MARCA_FALTA(etiquetaCargo); }
+        valores['especialidad ' + quien] = espCargo;
+        continue;
+      }
+      /* Fila 311: «, entre el … y el …» según «Actividades desde» y «Actividades hasta» del asunto. */
+      if (window.ActividadesTabla && /^actividades\s+periodo$/i.test(h)) { valores['actividades periodo'] = ActividadesTabla.periodoDe(valores); continue; }
+      var tabla = h.match(/^TABLA\s+([^:]+?)\s*(?::\s*(.*))?$/i);
+      if (tabla) {
+        var nombre = nombreTabla(tabla[1]);
+        var columnas = tabla[2] ? tabla[2].split('|').map(function (c) { return c.trim(); }).filter(Boolean)
+          : (nombre === 'TUTORIAS' ? COLUMNAS_TUTORIAS : ((await cargar()).tablas[nombre] || { cabecera: [] }).cabecera);
+        if (nombre === 'CONSEJO ESCOLAR' && !tabla[2]) columnas = TablasDatosConsejo.COLUMNAS;
+        var filas = await filasDe(nombre, persona);
+        if (nombre === 'TUTORIAS' && filas.length) filas = filtrarPorCursos(filas, valores, faltan);
+        if (window.ActividadesTabla && nombre === ActividadesTabla.NOMBRE && filas.length) {   /* fila 311 */
+          filas = ActividadesTabla.preparar(filas, valores, faltan);
+          if (!tabla[2]) columnas = ActividadesTabla.columnasPara(filas);
+        }
+        if (filas.length) {
+          var r = await Docx.ponerTabla(buffer, h, columnas, filas.map(function (f) { return celdasDe(nombre, f, columnas, { faltan: faltan }); }));
+          buffer = r.bytes;
+        } else {
+          var etiqueta = nombre === 'CONSEJO ESCOLAR' ? 'Consejo Escolar' : (window.ActividadesTabla && nombre === ActividadesTabla.NOMBRE ? 'Actividades extraescolares' : 'Tabla ' + tabla[1].trim());   /* filas 238 y 311 */
+          faltan.push(etiqueta);
+          valores.datosTablas[U.normalizar(h)] = Docx.MARCA_FALTA(etiqueta);
+        }
+        continue;
+      }
+      var dato = h.match(/^DATO\s+([^:]+?)\s*:\s*(.+)$/i);
+      if (dato) {
+        var filasD = await filasDe(dato[1], persona);
+        var v = filasD.length ? celdasDe(nombreTabla(dato[1]), filasD[filasD.length - 1], [dato[2].trim()])[0] : '';
+        if (!v) { faltan.push(dato[2].trim()); v = Docx.MARCA_FALTA(dato[2].trim()); }
+        valores.datosTablas[U.normalizar(h)] = v;
+      }
+    }
+    return { buffer: buffer, faltan: faltan, bloqueo: bloqueo };
+  }
+
+  /* La especialidad es el puesto de la persona en los RelPerCen (curso más reciente). */
+  async function especialidadDe(persona) {
+    if (!persona) return '';
+    if (persona.puesto) return persona.puesto;
+    try {
+      var personal = await Datos.cargar(App.E.datos, 'PERSONAL');
+      var clave = L.clave(persona.documento);
+      var p = personal.lista.filter(function (x) { return clave && L.clave(x.documento) === clave; })[0];
+      return (p && p.puesto) || '';
+    } catch (e) { return ''; }
+  }
+
+  /* La de quien ocupa un cargo (fila 123): por su documento si se sabe y,
+     si no, por el nombre, sin tildes, mayúsculas, comas ni orden («Pérez
+     Gómez, Juana» = «Juana Pérez Gómez»). */
+  function huesoDelNombre(n) {
+    return U.normalizar(String(n || '')).replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+  }
+
+  async function especialidadPorNombre(nombre, documento) {
+    if (!nombre && !documento) return '';
+    try {
+      var personal = await Datos.cargar(App.E.datos, 'PERSONAL');
+      var clave = L.clave(documento || '');
+      var hueso = huesoDelNombre(nombre);
+      var p = personal.lista.filter(function (x) {
+        return (clave.length > 4 && L.clave(x.documento) === clave) || (hueso && huesoDelNombre(x.nombre) === hueso);
+      })[0];
+      return (p && p.puesto) || '';
+    } catch (e) { return ''; }
+  }
+
+  /* Después de Docx.rellenar: lo marcado como falta, en amarillo. */
+  async function resaltarResultado(resultado, faltan) {
+    var bytes = new Uint8Array(await resultado.blob.arrayBuffer());
+    var nuevos = await Docx.resaltarFaltas(bytes);
+    var todas = (resultado.faltan || []).slice();
+    (faltan || []).forEach(function (f) { if (todas.indexOf(f) === -1) todas.push(f); });
+    return { blob: new Blob([nuevos], { type: resultado.blob.type }), faltan: todas };
+  }
+
+  return {
+    cargar: cargar, olvidar: olvidar, lista: lista, filasDe: filasDe, celdasDe: celdasDe,
+    nombreTabla: nombreTabla, prepararDocumento: prepararDocumento, resaltarResultado: resaltarResultado,
+    especialidadDe: especialidadDe, especialidadPorNombre: especialidadPorNombre, cargoDe: cargoDe,
+    COLUMNAS_TUTORIAS: COLUMNAS_TUTORIAS, _esDeLaPersona: esDeLaPersona
+  };
+})();
+window.TablasDatos = TablasDatos;

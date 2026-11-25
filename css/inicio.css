@@ -1,0 +1,547 @@
+/* ============================================================
+   inicio.css — la pantalla de Inicio (28-sep-2026, fila 212,
+   docs/INICIO-A-TODO-EL-ANCHO.md; sobre la fila 209,
+   docs/INICIO-EN-PESTANAS.md, en todo lo que decía distinto).
+
+   Sin columna izquierda: las pestañas y la tabla única ocupan todo el
+   ancho. Los colores de plazo son los de siempre: .marca-plazo,
+   .plazo-vencido, .plazo-cerca y .plazo-lejos vienen de
+   css/plazos.css y se reutilizan tal cual.
+   ============================================================ */
+
+#inicio-cuerpo { margin-bottom: 20px; }
+
+/* Fila 368: lo que comparte renglón en la cabecera de Inicio mide lo mismo y va centrado sobre la misma línea. */
+#pantalla-abiertos { --alto-renglon: 38px; --alto-renglon-tabla: 34px; }
+#pantalla-abiertos #btn-nuevo-asunto,
+#pantalla-abiertos #buscar-abiertos {
+  height: var(--alto-renglon);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+#pantalla-abiertos #btn-nuevo-asunto { display: inline-flex; align-items: center; }
+
+/* ---------- el hueco del tablón, en la propia cabecera ----------
+
+   Entre "+ Nuevo asunto" (lo cuelga js/barra.js justo detrás del
+   <h2>) y el buscador (.acciones). css/tablon.css pone el tamaño y el
+   aspecto de #tablon en sí; aquí solo el hueco que lo aloja dentro de
+   la cabecera, que ya es flex con flex-wrap (css/estilos.css,
+   .cabecera). */
+.inicio-tablon-hueco {
+  flex: 1 1 320px;
+  min-width: 220px;
+  max-width: 380px;
+}
+
+/* Por debajo de 900px de zona de trabajo (apartado 3), el tablón baja
+   a su propia línea, debajo de la cabecera: se le da todo el ancho y
+   se manda al final del flex (después de .acciones), en vez de
+   quedarse encajado entre el título y el buscador. */
+@container (max-width: 900px) {
+  .inicio-tablon-hueco { flex-basis: 100%; max-width: none; order: 5; }
+}
+
+/* ---------- "Ha llegado" + el cuadro de avisos (fila 212, apartado 2;
+   fila 353, docs/INICIO-MAS-COMPACTO.md) ----------
+
+   Desde la fila 353 viven dentro de la propia cabecera, detrás del
+   buscador, en la misma fila que "+ Nuevo asunto" y el tablón. Si no
+   caben, bajan a una segunda línea (flex-wrap de .cabecera). Con la
+   cabecera encogida se esconden (css/cabecera-fija.css). */
+
+.inicio-fila-superior {
+  flex: 1 1 360px;
+  min-width: 0;
+  display: flex;
+  align-items: center;   /* fila 368: «Ha llegado» y «N avisos» sobre la misma línea */
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+}
+@container (max-width: 900px) {
+  .inicio-fila-superior { flex-basis: 100%; order: 6; }
+}
+
+/* El título «Inicio» (fila 353): sigue en la página, solo no se ve. */
+#pantalla-abiertos > header.cabecera > h2.solo-lectores {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.inicio-ha-llegado-linea {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+}
+.inicio-ha-llegado-etiqueta { color: var(--tinta-suave); }
+.inicio-ha-llegado-vacio { color: var(--tinta-suave); }
+
+.inicio-ha-llegado-trozo {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--azul);
+}
+.inicio-ha-llegado-trozo:hover strong { text-decoration: underline; }
+
+/* Si hay algo nuevo desde la última vez, el número va resaltado
+   (la marca que antes llevaba #nuevos-sueltos). */
+.inicio-ha-llegado-nuevo strong {
+  background: var(--ambar, #fff4d6);
+  border: 1px solid var(--ambar-linea, #e6c377);
+  border-radius: 20px;
+  padding: 1px 9px;
+}
+
+/* El cuadro de avisos (fila 193/212): ya no ocupa todo el ancho, solo
+   lo que mide su texto, a la derecha de "Ha llegado". */
+.inicio-fila-superior .avisos-linea { flex: 0 1 auto; margin: 0; }
+
+/* ---------- elemento de compatibilidad (index.html): invisible a
+   ojo, pero con tamaño real para que Playwright lo pueda pulsar
+   (varias pruebas de pruebas/ siguen usando este selector) ---------- */
+
+.panel-legado-oculto {
+  /* `fixed` en una esquina, con hueco real: `absolute` sin `top`/`left`
+     se queda en su "posición estática", que puede caer debajo de otro
+     elemento (el envoltorio de la tabla lo tapaba y el click no le
+     llegaba). Aquí, ancho en su propio plano, nunca lo tapa nada. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  opacity: .01;
+  z-index: 9999;
+  white-space: nowrap;
+}
+
+/* ---------- "clasificar" sustituye del todo a Inicio (fila 214) ----------
+
+   Antes, #zona-clasificar se enseñaba a la vez que #inicio-cuerpo (y
+   #inicio-fila-superior): la lista quedaba abajo del todo, fuera de la
+   pantalla, y parecía que "N correos"/"N documentos por clasificar" no
+   hacía nada. App.irVista (js/asuntos-lista-montones.js) pone esta
+   clase en #pantalla-abiertos al entrar en "clasificar", y la quita al
+   volver. */
+#pantalla-abiertos.viendo-clasificar #inicio-fila-superior,
+#pantalla-abiertos.viendo-clasificar #inicio-cuerpo {
+  display: none;
+}
+
+/* ---------- "Ha llegado", en #zona-clasificar (fila 212) ----------
+
+   Al llegar desde uno de los dos enlaces de la línea de arriba, se
+   enseña solo esa mitad (App.pintarSoloQueClasificar, en
+   js/asuntos-lista-montones.js). */
+
+#zona-clasificar.solo-correos #lista-sueltos,
+#zona-clasificar.solo-correos #nuevos-sueltos,
+#zona-clasificar.solo-correos #btn-sueltos-visto,
+#zona-clasificar.solo-documentos #correos-sin-clasificar {
+  display: none;
+}
+
+/* Fila 289: la tercera clase, los encargos de los directivos (js/encargos-llegada.js). */
+#zona-clasificar.solo-encargos #correos-sin-clasificar,
+#zona-clasificar.solo-encargos #lista-sueltos,
+#zona-clasificar.solo-encargos #nuevos-sueltos,
+#zona-clasificar.solo-encargos #btn-sueltos-visto,
+#zona-clasificar.solo-correos #zona-encargos,
+#zona-clasificar.solo-documentos #zona-encargos {
+  display: none;
+}
+
+/* ---------- el badge rojo de vencidos, en la pestaña lateral "Inicio" ---------- */
+
+.pestana .cuenta.cuenta-roja {
+  background: var(--rojo-linea);
+  color: #fff;
+}
+
+/* ---------- las pestañas de la tabla (fila 209, apartado 4) ---------- */
+
+.inicio-tabla-cabecera {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.inicio-pestanas {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.inicio-pestana {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--alto-renglon-tabla);
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--tinta-suave);
+  font: inherit;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.inicio-pestana:hover { background: var(--fondo-hover, #f1f4f8); }
+.inicio-pestana.activa {
+  background: var(--azul);
+  color: #fff;
+}
+.inicio-pestana .cuenta {
+  display: inline-block;
+  min-width: 18px;
+  text-align: center;
+  background: var(--fondo-hover, #eef1f5);
+  color: var(--azul);
+  border-radius: 10px;
+  padding: 0 5px;
+  font-size: 11.5px;
+}
+.inicio-pestana .cuenta:empty { display: none; }
+.inicio-pestana.activa .cuenta { background: rgba(255, 255, 255, .25); color: #fff; }
+.inicio-pestana .cuenta.cuenta-roja {
+  background: var(--rojo-linea);
+  color: #fff;
+}
+
+.inicio-tabla-cabecera-acciones {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+/* Fila 368: los botones del renglón de las pestañas, del mismo alto que ellas. */
+.inicio-tabla-cabecera-acciones .boton,
+.inicio-tabla-cabecera-acciones .exportar-envoltorio > .boton {
+  height: var(--alto-renglon-tabla);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 9px;
+  padding-right: 9px;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+}
+.inicio-tabla-cabecera-acciones .boton.boton-reservados { font-size: 12px; padding-left: 6px; padding-right: 6px; }
+#restablecer-columnas { font-size: 12.5px; flex: 0 0 100%; text-align: right; }
+#restablecer-columnas.oculto { display: none; }
+
+/* ---------- el chip "Filtrado por…" (fila 209, apartado 7) ---------- */
+
+#inicio-filtrado-por {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13.5px;
+}
+#inicio-filtrado-por-texto {
+  background: var(--fondo-hover, #eef1f5);
+  color: var(--azul);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-weight: 600;
+}
+#inicio-quitar-filtro {
+  background: none;
+  border: 0;
+  color: var(--tinta-suave);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+#inicio-quitar-filtro:hover { text-decoration: underline; }
+
+/* El trozo activo de la franja de avisos (js/avisos-linea.js), cuando
+   coincide con el chip de arriba. */
+.avisos-linea-trozo-activo { text-decoration-color: currentColor !important; font-weight: 700; }
+
+/* ---------- la tabla ---------- */
+
+#inicio-todos-asuntos { margin-top: 6px; }
+
+/* Fila 243 (docs/TITULOS-DE-LA-TABLA-FIJOS.md): las pestañas y los títulos de las
+   columnas se quedan fijos bajo la cabecera encogida (js/cabecera-fija.js pone
+   --cabecera-fija-alto y --inicio-pestanas-alto). Fondo opaco, para que las filas
+   no se transparenten, y una línea suave donde acaba lo fijo. z-index por debajo
+   de la cabecera (20) y por encima de las filas. Las pestañas y sus botones
+   (Actualizar, Filtros, Exportar, Ordenar) dejan de ser un solo bloque
+   (`display: contents`) para que solo las pestañas se fijen: así su contenedor
+   es toda la zona de la tabla y no solo su fila. */
+#inicio-todos-asuntos { display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; }
+/* Fila 368 (docs/INICIO-COLOCACION-Y-COLUMNAS.md, parte 1): las pestañas y sus botones (cuenta, Actualizar, Filtros,
+   Exportar) comparten renglón, los botones pegados al borde derecho, y todo el renglón se queda fijo. Si no caben
+   en uno, los botones pasan al renglón de abajo, alineados a la derecha. */
+#inicio-todos-asuntos > .inicio-tabla-cabecera {
+  flex: 0 0 100%;
+  position: sticky;
+  top: var(--cabecera-fija-alto, 0px);
+  z-index: 19;
+  background: var(--fondo);
+  padding: 6px 0;
+  margin: 0;
+  gap: 6px 8px;
+  align-items: center;
+}
+#inicio-todos-asuntos > .inicio-tabla-cabecera > #inicio-pestanas { flex: 0 1 auto; padding: 0; }
+#inicio-todos-asuntos > .inicio-tabla-cabecera > .inicio-tabla-cabecera-acciones { margin: 0 0 0 auto; flex: 0 1 auto; }
+#inicio-todos-asuntos > #filtros-abiertos,
+#inicio-todos-asuntos > #inicio-filtrado-por,
+#inicio-todos-asuntos > .inicio-tabla-envoltorio { flex: 0 0 100%; min-width: 0; }
+.inicio-tabla thead th {
+  position: sticky;
+  top: calc(var(--cabecera-fija-alto, 0px) + var(--inicio-pestanas-alto, 0px));
+  z-index: 18;
+  background: var(--papel);
+  box-shadow: 0 1px 0 var(--linea);
+}
+/* Un contenedor con `overflow-x: auto` anula `sticky`: solo se usa cuando la tabla
+   no cabe (ventana estrecha), y entonces los títulos van con la tabla. */
+.inicio-tabla-envoltorio { overflow-x: clip; }
+.inicio-tabla-envoltorio.desborda { overflow-x: auto; }
+.inicio-tabla-envoltorio.desborda .inicio-tabla thead th { position: static; box-shadow: none; }
+
+.inicio-tabla-envoltorio {
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+}
+table.inicio-tabla {
+  width: 100%;
+  border-collapse: collapse;
+}
+.inicio-tabla th,
+.inicio-tabla td {
+  text-align: left;
+  padding: 8px 8px;   /* fila 243: 8 px a cada lado (antes 12), para que la tabla quepa en 1280 px y los títulos puedan quedarse fijos */
+  border-bottom: 1px solid var(--linea);
+  vertical-align: middle;
+}
+.inicio-tabla th.th-ordenable { cursor: pointer; }
+.inicio-tabla th.th-ordenable:hover { text-decoration: underline; text-decoration-color: var(--tinta-suave); text-underline-offset: 3px; }
+.inicio-tabla th .orden-flecha { white-space: nowrap; }
+.inicio-tabla th {
+  font-size: 11.5px;
+  color: var(--tinta-suave);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.inicio-tabla-fila:last-child td { border-bottom: 0; }
+.inicio-tabla-fila { cursor: pointer; }
+.inicio-tabla-fila:hover td { background: var(--fondo-hover, #f6f9fc); }
+.inicio-tabla-tercero {
+  font-weight: 600;
+  min-width: 200px;
+  word-break: break-word;
+}
+.inicio-tabla-tercero .nombre-pulsable { cursor: pointer; }
+.inicio-tabla-tercero .nombre-pulsable:hover { text-decoration: underline; }
+.inicio-tabla-hito { max-width: 320px; }
+.inicio-tabla-menu { width: 40px; text-align: right; }
+.inicio-tabla-fila-ocupada { opacity: .6; }
+.inicio-tabla-cuerpo .vacio,
+#inicio-tabla-cuerpo .vacio { color: var(--tinta-suave); text-align: center; padding: 18px; }
+
+/* Los días de espera de "En espera": rojo desde 15 días, ámbar desde
+   7, reutilizando los mismos tonos que .plazo-vencido/.plazo-cerca
+   (css/plazos.css), sin inventar otra paleta. */
+.marca-plazo.inicio-dias-rojo { background: #fdecec; color: #a4302a; border-color: #f2c4c0; }
+.marca-plazo.inicio-dias-ambar { background: #fff4d6; color: #8a6100; border-color: #e6c377; }
+
+/* ---------- el cuadro único de avisos (fila 193, apartado 1,
+   docs/AVISOS-MENU-Y-VOLVER.md; fila 212, apartado 2: pequeño, no a
+   todo el ancho) ----------
+
+   Un trozo por aviso, separados por " · " (.avisos-linea-sep), cada
+   uno pulsable (.avisos-linea-trozo), con una ✕ pequeña a la derecha
+   para "Ocultar por hoy". Mismo color de fondo que los avisos de
+   siempre (.aviso-rojo/.aviso-ambar, css/estilos.css). El cuadro mide
+   lo que mide su texto (.inicio-fila-superior .avisos-linea, arriba),
+   nunca todo el ancho; si no caben en una línea, se parte en dos
+   (flex-wrap), sin invadir "Ha llegado". */
+
+.avisos-linea {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-radius: var(--radio);
+  padding: 6px 8px 6px 12px;
+  font-size: 13px;
+  max-width: 480px;
+}
+
+.avisos-linea-texto {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.avisos-linea-trozo {
+  font: inherit;
+  color: inherit;
+}
+button.avisos-linea-trozo {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, .25);
+}
+button.avisos-linea-trozo:hover {
+  text-decoration-color: currentColor;
+}
+
+.avisos-linea-sep {
+  color: var(--tinta-suave);
+}
+
+.avisos-linea-ocultar {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .08);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.avisos-linea-ocultar:hover { background: rgba(0, 0, 0, .16); }
+
+/* Fila 249 (docs/POR-LIQUIDAR.md): la pestaña «Por liquidar». */
+.inicio-liquidar-barra { display: flex; align-items: center; gap: 14px; flex: 0 0 100%; margin: 0 0 10px; }
+.inicio-liquidar-barra.oculto { display: none; }
+.inicio-liquidar-marcados { font-weight: 600; }
+.inicio-tabla .liq-casilla { width: 34px; text-align: center; }
+.inicio-tabla .liq-importe { text-align: right; white-space: nowrap; }
+.inicio-tabla .liq-importe-ambar { color: var(--ambar-linea, #b26a00); }
+.liq-lista { margin: 4px 0 0; padding-left: 18px; max-height: 160px; overflow-y: auto; font-size: 13px; }
+
+
+/* ---------- plegar el cuadro de avisos (fila 353, apartado 4) ----------
+
+   Plegado es una sola línea: «N avisos ▸». Abierto, el cuadro de
+   siempre con un «▾» delante para volver a plegarlo. */
+.avisos-linea-plegado {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.avisos-linea-plegado:hover { text-decoration: underline; }
+.avisos-linea-pliega {
+  flex: 0 0 auto;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.avisos-linea.avisos-linea-cerrado { flex-wrap: nowrap; }
+
+
+/* ---------- el cuadro de avisos flota (fila 368, docs/INICIO-COLOCACION-Y-COLUMNAS.md, parte 1.3) ----------
+
+   La línea «N avisos ▸/▾» es siempre del mismo tamaño y no se mueve. Abierto, el cuadro (.avisos-linea-panel) cuelga
+   de ella por debajo, por encima de la lista y de la cabecera fija de la tabla (la cabecera de la pantalla tiene
+   z-index 20, la de la tabla 19), sin empujar nada. Si no cabe en la ventana, tiene su propia barra. */
+.avisos-linea {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  box-sizing: border-box;
+  min-height: var(--alto-renglon, 38px);
+  padding: 0 12px;
+  font-size: 13px;
+  max-width: none;
+}
+.avisos-linea-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  display: block;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 280px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radio);
+  padding: 10px 40px 10px 14px;
+  text-align: left;
+  box-shadow: 0 6px 20px rgba(10, 25, 45, .22);
+}
+.avisos-linea-panel .avisos-linea-texto { line-height: 1.7; }
+.avisos-linea-panel button.avisos-linea-trozo { text-align: left; }
+.avisos-linea-panel .btn-traer-aviso { display: block; margin-top: 8px; }
+.avisos-linea-panel .avisos-linea-ocultar { position: absolute; top: 8px; right: 8px; }
+@media (max-width: 900px) {
+  .avisos-linea-panel { max-width: calc(100vw - 48px); }
+}
+
+/* Con sitio de sobra, las pestañas y los botones recuperan su tamaño de siempre (fila 368). */
+@media (min-width: 1700px) {
+  .inicio-pestana { padding: 0 12px; font-size: 13.5px; gap: 6px; }
+  .inicio-tabla-cabecera-acciones .boton,
+  .inicio-tabla-cabecera-acciones .exportar-envoltorio > .boton { padding-left: 14px; padding-right: 14px; font-size: 14px; }
+  .inicio-tabla-cabecera-acciones .boton.boton-reservados { font-size: 12px; padding-left: 9px; padding-right: 9px; }
+}
+
+/* Arrastrar el título de una columna (fila 368): la columna que se coge y la marca de dónde caerá. */
+.inicio-tabla th[data-col] { user-select: none; -webkit-user-select: none; }
+.inicio-tabla th.th-arrastrada { opacity: .55; cursor: grabbing; }
+.th-marca-hueco {
+  position: fixed;
+  width: 3px;
+  background: var(--azul);
+  border-radius: 2px;
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* ---------- Aviso «falta señalar la carpeta de entrada» (fila 687, js/entrada-aviso.js) ---------- */
+.aviso-sin-entrada {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 13.5px; color: #8a5a00;
+  background: var(--ambar, #fff4d6); border: 1px solid var(--ambar-linea, #e0b34a);
+  border-radius: 6px; padding: 4px 10px;
+}
+#aviso-sin-entrada-clasificar { margin: 0 0 10px; }
+.aviso-sin-entrada.oculto, .aviso-sin-entrada .oculto { display: none; }

@@ -1,0 +1,328 @@
+/* ============================================================
+   plantillas-documento-ajustes.js — la sección «Plantilla de documento
+   de Word» de la pantalla de un tipo (PlantillasDocumento.pintarDeTipo
+   y PlantillasDocumento.abrirCuadroDePlantillaDoc). Salió de
+   js/plantillas-documento.js en la fila 133 (24-sep-2026,
+   docs/PARTIR-FICHEROS-GRANDES.md), sin cambiar nada. Se carga justo
+   después de js/plantillas-documento.js.
+   ============================================================ */
+(function () {
+  var I = window.PlantillasDocumento._interno;
+  function $(id) { return document.getElementById(id); }
+
+  /* ==========================================================
+     LA SECCIÓN "PLANTILLA DE DOCUMENTO DE WORD" DE LA PANTALLA DE UN
+     TIPO (17-sep-2026, fila 39, docs/AJUSTES-POR-TIPO.md)
+
+     Hermana de la de correo (js/plantillas-ajustes.js): buscador ya no
+     hace falta, porque solo se ven las de un tipo. Tarjetas, alta con
+     el .docx elegido de entre los que ya estén subidos a
+     _GESTOR/PLANTILLAS, edición y borrado con Papelera, y debajo el
+     catálogo de huecos con un botón de copiar en cada uno.
+     ========================================================== */
+
+  var datosDeAjustes = null;
+  var refrescarSeccionActual = function () {};
+
+  /* Los huecos "de llave doble" (20-sep-2026, fila 81): se resuelven
+     aparte, antes que los demás, así que se escriben con doble llave
+     para que no se confundan con un dato de asunto corriente. `{LO QUE
+     FALTA}` ya trae sus propias llaves dentro de la clave (viene de
+     antes); los de aquí, no. */
+  var HUECOS_DE_LLAVE_DOBLE = ['firmante', 'cargo firmante', 'tratamiento firmante',
+    'visto bueno', 'cargo visto bueno', 'tratamiento visto bueno', 'consejeria', 'formularios', 'especialidad'];
+
+  function textoDelHueco(h) {
+    if (h.clave.indexOf('{') !== -1) return '{' + h.clave + '}';    /* {LO QUE FALTA} */
+    if (HUECOS_DE_LLAVE_DOBLE.indexOf(h.clave) !== -1) return '{{' + h.clave.toUpperCase() + '}}';
+    return '{' + h.clave + '}';
+  }
+
+  function pintarHuecos(caja) {
+    if (!caja) return;
+    caja.innerHTML = '';
+    Plantillas.HUECOS.forEach(function (h) {
+      var texto = textoDelHueco(h);
+      var fila = document.createElement('div');
+      fila.className = 'pd-hueco-fila';
+      fila.innerHTML = '<code>' + U.escapar(texto) + '</code><span class="suave">' + U.escapar(h.etiqueta) + '</span>';
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'boton';
+      b.textContent = 'Copiar';
+      b.onclick = function () { copiarHueco(texto, b); };
+      fila.appendChild(b);
+      caja.appendChild(fila);
+    });
+    /* Fila 111 (js/genero.js): las formas dobles, y de quién son. */
+    var genero = document.createElement('p');
+    genero.className = 'suave pd-hueco-genero';
+    genero.innerHTML = 'Masculino o femenino: escribe las dos formas con barra (<code>el/la alumno/a</code>, ' +
+      '<code>D./Dña.</code>) y sale solo la que toca. Son de la persona del asunto; para otra, pega detrás ' +
+      '<code>:tutor1</code>, <code>:tutor2</code>, <code>:firmante</code> o <code>:vistobueno</code> ' +
+      '(<code>hijo/a:tutor1</code>). «Director/a» y los demás cargos ya son de quien firma.';
+    caja.appendChild(genero);
+  }
+
+  function copiarHueco(texto, boton) {
+    U.copiar(texto, boton);
+  }
+
+  /* Pinta, dentro de `contenedor`, solo las plantillas de documento de
+     `tipo`. Se llama desde la sección "Plantilla de documento de Word"
+     de la pantalla de un tipo (js/ajustes-tipo.js). */
+  async function pintarDeTipo(contenedor, tipo) {
+    if (!contenedor) return;
+    if (App.E.gestor) datosDeAjustes = await Plantillas.cargar(App.E.gestor);
+    refrescarSeccionActual = function () { pintarDeTipo(contenedor, tipo); };
+
+    var lista = (datosDeAjustes ? datosDeAjustes.documentos : [])
+      .filter(function (p) { return p.tipo === tipo.tipo; })
+      .sort(function (a, b) { return a.nombre < b.nombre ? -1 : 1; });
+
+    contenedor.innerHTML =
+      '<p class="nota">También puedes crear una plantilla desde un documento de un asunto: en su menú ⋮, «Convertir en plantilla».</p>' +
+      '<p class="explica">Sube antes el .docx a la nube (Dropbox o Google Drive), dentro de la carpeta de asuntos ' +
+      'abiertos, en <code>_GESTOR/PLANTILLAS</code>. Aquí se cuelga de este tipo: el botón ' +
+      '"Generar documento" de la ficha saca una copia ya rellena, sin preguntar nada.</p>' +
+      '<div id="tipo-pd-lista" class="rejilla-tipos"></div>' +
+      '<button type="button" class="boton boton-principal" id="tipo-pd-nueva" ' +
+      'style="margin-top:10px">+ Nueva plantilla</button>' +
+      '<hr>' +
+      '<label class="etiqueta">Campos variables que se pueden usar en el Word</label>' +
+      '<p class="nota">Cópialos y pégalos donde haga falta, escritos igual, entre llaves.</p>' +
+      '<div id="tipo-pd-huecos" class="rejilla-huecos"></div>';
+
+    var caja = $('tipo-pd-lista');
+    if (!lista.length) {
+      caja.innerHTML = '<div class="vacio">Todavía no hay ninguna plantilla de documento para este tipo.</div>';
+    } else {
+      lista.forEach(function (p) { caja.appendChild(tarjetaDePlantillaDoc(p)); });
+    }
+    $('tipo-pd-nueva').onclick = function () { abrirCuadroDePlantillaDoc(null, tipo, refrescarSeccionActual); };
+    /* Fila 320: la pantalla «Plantillas», con este tipo ya puesto. */
+    if (window.PlantillasPantalla) PlantillasPantalla.enlaceDeTipo($('tipo-pd-nueva'), 'word', tipo.tipo);
+    pintarHuecos($('tipo-pd-huecos'));
+  }
+
+  function tarjetaDePlantillaDoc(p) {
+    var div = document.createElement('div');
+    div.className = 'tarjeta-tipo' + (Plantillas.enUso(p) ? '' : ' tarjeta-fuera-de-uso');
+    div.innerHTML = '<div class="nombre-tipo">' + U.escapar(p.nombre) + '</div>' +
+      (Plantillas.enUso(p) ? '' : '<div class="suave">' + U.escapar(PlantillasFueraDeUso.etiqueta(p)) + '</div>') +
+      '<div class="suave">' + U.escapar(p.tipo) + '  ·  ' + U.escapar(p.categoria) + '</div>' +
+      '<div class="suave">' + U.escapar(p.fichero) + '</div>';
+
+    var acciones = document.createElement('div');
+    acciones.className = 'acciones';
+    acciones.style.marginTop = '8px';
+
+    var retocar = document.createElement('button');   /* fila 322: cambiar trozos del texto del Word */
+    retocar.type = 'button';
+    retocar.className = 'boton';
+    retocar.textContent = 'Retocar';
+    retocar.onclick = function () { return PlantillaRetocarPantalla.abrir(p, refrescarSeccionActual); };
+    acciones.appendChild(retocar);
+
+    var editar = document.createElement('button');
+    editar.type = 'button';
+    editar.className = 'boton';
+    editar.textContent = 'Cambiar';
+    editar.onclick = function () { abrirCuadroDePlantillaDoc(p, null, refrescarSeccionActual); };
+    acciones.appendChild(editar);
+    if (!Plantillas.enUso(p)) {
+      var activar = document.createElement('button');
+      activar.type = 'button';
+      activar.className = 'boton';
+      activar.textContent = 'Volver a activar';
+      activar.onclick = function () { return PlantillasFueraDeUso.volverAActivar(p, 'documento', refrescarSeccionActual); };
+      acciones.appendChild(activar);
+    }
+
+    acciones.appendChild(Papelera.botonBorrar(async function () {
+      if (await Plantillas.borrarConPapelera(p, 'documento')) refrescarSeccionActual();   /* fila 320: el mismo código que la pantalla «Plantillas» */
+    }));
+
+    div.appendChild(acciones);
+    return div;
+  }
+
+  function opcionesDeCategoria(categoria) {
+    return (App.E.tipos || []).filter(function (t) { return t.categoria === categoria; });
+  }
+
+  /* Los .docx que ya haya en _GESTOR/PLANTILLAS, para elegir de ahí en
+     el alta: nunca se sube un fichero desde este cuadro (eso lo hace
+     Francisco a mano, en Dropbox), solo se cuelga de un tipo. */
+  async function ficherosDeWordDisponibles() {
+    try {
+      var carpeta = await I.carpetaDePlantillas();
+      var lista = await Carpetas.ficheros(carpeta);
+      return lista.map(function (f) { return f.nombre; }).filter(function (n) {
+        return /\.docx$/i.test(n);
+      }).sort();
+    } catch (e) { return []; }
+  }
+
+  /* Los cargos del centro (20-sep-2026, fila 81), en su `orden`, para
+     los desplegables "Quien firma" y "Visto bueno". */
+  async function opcionesDeCargos(idElegido) {
+    if (!window.Cargos) return '<option value="">(sin cargos)</option>';
+    var datos = await Cargos.leer();
+    return Cargos.ordenados(datos).map(function (c) {
+      return '<option value="' + U.escapar(c.id) + '"' + (c.id === idElegido ? ' selected' : '') + '>' +
+        U.escapar(c.nombre) + '</option>';
+    }).join('');
+  }
+
+  /* Fila 615: el editor de plantillas de documento en tres piezas (el cuerpo, el enganche y el guardado) para poder
+     pintarlo también en la columna derecha del editor de la guía (js/guias-plantilla-nueva.js), sin abrir un cuadro
+     nuevo que cerraría la guía. `abrirCuadroDePlantillaDoc` las junta, igual que antes. */
+  async function prepararCuadroDoc(existente, tipoPreset) {
+    var categorias = Nombres.CATEGORIAS;
+    var categoriaInicial = (existente && existente.categoria) || (tipoPreset && tipoPreset.categoria) || categorias[0];
+    var ficheros = await ficherosDeWordDisponibles();
+    var opcionesFirmante = '<option value="">(ninguno)</option>' + await opcionesDeCargos(existente && existente.firmante);
+    var opcionesVistoBueno = '<option value="">(ninguno)</option>' + await opcionesDeCargos(existente && existente.vistoBueno);
+
+    function opcionesTipos(categoria) {
+      return opcionesDeCategoria(categoria).map(function (t) {
+        var elegido = existente ? existente.tipo === t.tipo : (tipoPreset && tipoPreset.tipo === t.tipo);
+        return '<option value="' + U.escapar(t.tipo) + '"' + (elegido ? ' selected' : '') + '>' +
+          U.escapar(t.tipo) + '</option>';
+      }).join('');
+    }
+
+    function opcionesFicheros() {
+      if (!ficheros.length) {
+        return '<option value="">(no hay ningún .docx en _GESTOR/PLANTILLAS)</option>';
+      }
+      return ficheros.map(function (n) {
+        return '<option value="' + U.escapar(n) + '"' +
+          (existente && existente.fichero === n ? ' selected' : '') + '>' + U.escapar(n) + '</option>';
+      }).join('');
+    }
+
+    var cuerpo =
+      '<div class="dos-columnas">' +
+        '<div><label class="etiqueta">Categoría</label>' +
+          '<select id="pd-categoria" class="campo">' +
+            categorias.map(function (c) {
+              return '<option value="' + c + '"' + (c === categoriaInicial ? ' selected' : '') + '>' + c + '</option>';
+            }).join('') +
+          '</select></div>' +
+        '<div><label class="etiqueta">Tipo de asunto</label>' +
+          '<select id="pd-tipo" class="campo">' + opcionesTipos(categoriaInicial) + '</select></div>' +
+      '</div>' +
+      '<label class="etiqueta">Fichero de Word</label>' +
+      '<select id="pd-fichero" class="campo">' + opcionesFicheros() + '</select>' +
+      '<p class="pf-traer"><button type="button" class="boton" id="pd-traer-word">Traer un Word del ordenador…</button></p>' +
+      '<label class="etiqueta">Nombre de la plantilla</label>' +
+      '<input id="pd-nombre" class="campo" value="' + U.escapar((existente && existente.nombre) || '') + '">' +
+      '<div class="dos-columnas">' +
+        '<div><label class="etiqueta">Tipo de documento</label>' +
+          '<input id="pd-tipo-doc" class="campo" placeholder="NOTIFICACIÓN, RESOLUCIÓN…" ' +
+            'value="' + U.escapar((existente && existente.tipoDocumento) || '') + '"></div>' +
+        '<div><label class="etiqueta">Texto adicional <span class="suave">(opcional)</span></label>' +
+          '<input id="pd-texto" class="campo" value="' + U.escapar((existente && existente.texto) || '') + '"></div>' +
+      '</div>' +
+      '<p class="nota">Con esas dos piezas y la fecha de hoy se monta el nombre del documento generado.</p>' +
+      '<div class="dos-columnas">' +
+        '<div><label class="etiqueta">Quien firma</label>' +
+          '<select id="pd-firmante" class="campo">' + opcionesFirmante + '</select></div>' +
+        '<div><label class="etiqueta">Visto bueno <span class="suave">(opcional)</span></label>' +
+          '<select id="pd-visto-bueno" class="campo">' + opcionesVistoBueno + '</select></div>' +
+      '</div>' +
+      '<p class="nota">Se pone la persona que ocupaba ese cargo en la fecha del documento ' +
+      '(Ajustes → El centro → Cargos del centro).</p>' +
+      /* Fila 149: con o sin el logo del centro en el membrete (sin la clave, con). */
+      '<label class="pd-con-logo"><input type="checkbox" id="pd-con-logo"' +
+        (existente && existente.conLogoCentro === false ? '' : ' checked') + '> Con el logo del centro</label>' +
+      '<p class="nota">En el membrete, a la derecha (Ajustes → El centro → Membrete). Sin marcar, esa parte sale en blanco.</p>';
+
+    function enganchar() {
+    $('pd-categoria').onchange = function () {
+      $('pd-tipo').innerHTML = opcionesTipos($('pd-categoria').value);
+    };
+    /* Fila 320: traer el .docx del ordenador sin copiarlo antes a Dropbox; queda elegido en el desplegable. */
+    var traer = $('pd-traer-word');
+    if (traer) {
+      if (window.SoloConsulta && SoloConsulta.activo()) traer.disabled = true;
+      traer.onclick = async function () {
+        var nombreNuevo = await PlantillasFichero.traerWord();
+        if (!nombreNuevo) return;
+        var sel = $('pd-fichero');
+        if (!sel) return;
+        if (sel.options.length === 1 && !sel.options[0].value) sel.innerHTML = '';
+        var o = document.createElement('option');
+        o.value = nombreNuevo; o.textContent = nombreNuevo;
+        sel.appendChild(o);
+        sel.value = nombreNuevo;
+      };
+    }
+
+    }   /* fin de enganchar() */
+
+    /* Lee los campos y guarda. Devuelve true si ha guardado (si falta algo o falla, avisa y devuelve false). */
+    async function guardar(alGuardar) {
+    var nombre = $('pd-nombre').value.trim();
+    var tipo = $('pd-tipo').value;
+    var categoria = $('pd-categoria').value;
+    var fichero = $('pd-fichero').value;
+    var tipoDocumento = $('pd-tipo-doc').value.trim();
+    var texto = $('pd-texto').value.trim();
+    var firmante = $('pd-firmante').value;
+    var vistoBueno = $('pd-visto-bueno').value;
+    var conLogoCentro = !$('pd-con-logo') || $('pd-con-logo').checked;
+
+    if (!nombre || !tipo || !fichero || !tipoDocumento) {
+      U.aviso('Hace falta el nombre, el tipo, el fichero y el tipo de documento.', 'malo');
+      return false;
+    }
+
+    try {
+      await Plantillas.guardar(App.E.gestor, function (actual) {
+        if (existente) {
+          var i = actual.documentos.findIndex(function (x) { return x.id === existente.id; });
+          if (i !== -1) {
+            /* Fila 321: se parte de la fila que había, para no perder las claves que este cuadro no conoce (`fueraDeUso`). */
+            actual.documentos[i] = Object.assign({}, actual.documentos[i], { id: existente.id, tipo: tipo, categoria: categoria, nombre: nombre,
+              fichero: fichero, tipoDocumento: tipoDocumento, texto: texto,
+              firmante: firmante, vistoBueno: vistoBueno, conLogoCentro: conLogoCentro });
+          }
+        } else {
+          actual.documentos.push({ id: Plantillas.idNuevoDocumento(), tipo: tipo, categoria: categoria,
+            nombre: nombre, fichero: fichero, tipoDocumento: tipoDocumento, texto: texto,
+            firmante: firmante, vistoBueno: vistoBueno, conLogoCentro: conLogoCentro });
+        }
+        return actual;
+      });
+      U.aviso(existente ? 'Plantilla de documento guardada.' : 'Plantilla de documento creada.', 'bueno');
+      if (typeof alGuardar === 'function') alGuardar();
+      return true;
+    } catch (e) {
+      U.aviso('No he podido guardarlo: ' + U.mensajeDeError(e), 'malo');
+      return false;
+    }
+    }   /* fin de guardar() */
+
+    return { cuerpo: cuerpo, enganchar: enganchar, guardar: guardar };
+  }
+
+  async function abrirCuadroDePlantillaDoc(existente, tipoPreset, alGuardar) {
+    var cuadro = await prepararCuadroDoc(existente, tipoPreset);
+    var promesa = U.preguntar(existente ? 'Cambiar plantilla de documento' : 'Nueva plantilla de documento',
+      cuadro.cuerpo, existente ? 'Guardar' : 'Crear');
+    cuadro.enganchar();
+    var ok = await promesa;
+    if (!ok) return;
+    await cuadro.guardar(alGuardar);
+  }
+
+  /* «Cargar las plantillas del centro» vive en js/plantillas-centro.js
+     desde la fila 126 (este fichero pasaba de 700 líneas). */
+
+  window.PlantillasDocumento.pintarDeTipo = pintarDeTipo;
+  window.PlantillasDocumento.abrirCuadroDePlantillaDoc = abrirCuadroDePlantillaDoc;
+  window.PlantillasDocumento.prepararCuadroDoc = prepararCuadroDoc;   /* fila 615 */
+})();

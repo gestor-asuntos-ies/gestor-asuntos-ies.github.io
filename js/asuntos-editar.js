@@ -1,0 +1,490 @@
+/* ============================================================
+   asuntos-editar.js — editar un asunto ya creado.
+
+   Va en su propio fichero porque es lo más delicado de la aplicación:
+   cambiar cualquiera de sus datos significa cambiarle el nombre a la
+   carpeta, y eso hay que hacerlo con cuidado.
+
+   Solo se hace en los asuntos abiertos: el nombre de una carpeta
+   archivada es el rastro de aquel día.
+   ============================================================ */
+
+/* Saca las piezas del asunto para rellenar el cuadro.
+
+   Si el asunto lo creó la aplicación, sus piezas están en la ficha, y
+   se usan tal cual siempre que vuelvan a montar el nombre que tiene la
+   carpeta hoy. Si no cuadran, o si la carpeta se creó a mano, se leen
+   del propio nombre: el año académico y el grupo se reconocen por su
+   forma, y todo lo demás se deja en el tercero, para no partir por la
+   mitad algo que no se sabe partir. */
+/* El nombre de la carpeta lleva el nombre corto del tipo si lo tiene
+   (20-sep-2026, fila 79, apartado 4.9): las piezas guardadas (`p.tipo`,
+   `datos.tipo`) se quedan con el nombre de siempre, que es el que hay
+   que buscar en la guía y en las cuentas por tipo; solo el nombre que
+   se monta pasa por Nombres.tipoParaCarpeta. */
+function nombreConTipoCorto(d) { return nombreConTipoCortoAjustado(d).nombre; }
+
+/* { nombre, recortado } (fila 130: la carpeta no pasa de 150 caracteres). */
+function nombreConTipoCortoAjustado(d) {
+  var tipo = App.E.tipos.filter(function (t) { return t.tipo === d.tipo; })[0];
+  var copia = Object.assign({}, d, { tipo: tipo ? Nombres.tipoParaCarpeta(tipo) : d.tipo });
+  return Nombres.montarAsunto(copia);
+}
+
+App.piezasDelAsunto = function (a) {
+  var fecha = /^\d{6}$/.test(a.leido.fecha)
+    ? '20' + a.leido.fecha.slice(0, 2) + '-' + a.leido.fecha.slice(2, 4) + '-' + a.leido.fecha.slice(4, 6)
+    : '';
+
+  var deFicha = {
+    fecha: fecha,
+    tipo: a.ficha.tipo || a.leido.tipo || '',
+    curso: a.ficha.curso || '',
+    grupo: typeof a.ficha.grupo === 'string' ? a.ficha.grupo : '',   /* fila 293: el de un asunto de grupo es un objeto */
+    campos: (a.ficha.campos && typeof a.ficha.campos === 'object') ? a.ficha.campos : {},
+    descripcion: a.ficha.descripcion || '',
+    tercero: a.ficha.tercero || '',
+    /* Fila 239: el número de asunto no cambia nunca; sin número (asunto
+       de antes), la estructura de siempre. */
+    numero: a.ficha.numero || a.leido.numero || '',
+    categoria: a.ficha.categoria || ''
+  };
+  var comprobacion = nombreConTipoCorto(Object.assign({}, deFicha,
+    { campos: App.valoresGuardadosParaNombre(deFicha.tipo, deFicha.campos) }));
+  if (deFicha.tercero && comprobacion === a.nombre) return deFicha;
+
+  var resto = a.leido.resto || '';
+  var mCurso = resto.match(/^(\d{2}[-\/]\d{2})\s+/);
+  var curso = mCurso ? mCurso[1].replace('/', '-') : '';
+  if (mCurso) resto = resto.slice(mCurso[0].length);
+  var mGrupo = resto.match(/^(\d[ºo°](?:Bach|FP|Div)?[A-Za-z]?)\s+/i);
+  var grupo = mGrupo ? mGrupo[1] : '';
+  if (mGrupo) resto = resto.slice(mGrupo[0].length);
+
+  return {
+    fecha: fecha,
+    tipo: a.leido.tipo || '',
+    curso: curso,
+    grupo: grupo,
+    campos: deFicha.campos,
+    descripcion: '',
+    tercero: U.limpiarNombre(resto),
+    numero: a.ficha.numero || a.leido.numero || '',   /* fila 239 */
+    categoria: a.ficha.categoria || ''
+  };
+};
+
+/* Los valores ya guardados de un asunto (`ficha.campos`), en el orden
+   configurado para su tipo y solo los que están marcados "Añadir al
+   nombre". Sirve tanto para comprobar si el nombre de hoy cuadra con
+   lo guardado, como para volver a montarlo tras una edición. */
+App.valoresGuardadosParaNombre = function (tipo, camposGuardados) {
+  var config = (App.E.campos && App.E.campos.porTipo && App.E.campos.porTipo[tipo]) || [];
+  var guardados = camposGuardados || {};
+  return config
+    .map(function (cfg) { var g = guardados[Campos.claveDeCampo(cfg)]; return g && { g: g, clase: Campos.claseDeCampo(cfg, App.E.campos) }; })
+    .filter(function (x) { return x && x.g.enNombre && x.g.valor; })
+    .map(function (x) { return Campos.mostrarValor(x.clase, x.g.valor); });   /* fila 244: lo que se ve */
+};
+
+/* Los campos del cuadro de editar: los mismos que tiene puestos el
+   tipo en Ajustes, rellenos con lo que se guardó (no se vuelve a
+   preguntar al tercero: si algo cambió desde entonces, se corrige a
+   mano, igual que el resto del formulario). Si al cambiar el tipo en
+   el propio cuadro hubiera otro juego de campos, aquí se sigue
+   enseñando el del tipo con el que se abrió: cambiar el tipo de un
+   asunto ya abierto es raro, y no merece la pena releer el catálogo
+   de otra categoría en mitad de la edición. */
+/* Fila 255: el título del hito de un campo (en pequeño junto al nombre), de lo último leído. */
+function tituloDeHito(nombreAsunto, marca) {
+  var hitos = (window.CamposDeHito && nombreAsunto) ? CamposDeHito.hitosDelAsunto(nombreAsunto) : null;
+  var h = (hitos || []).filter(function (x) { return x.origenGuia === marca || x.id === marca; })[0];
+  return h ? h.titulo : 'hito';
+}
+
+App.pintarCamposEditar = function (tipo, guardados, ficha, nombreAsunto) {
+  var config = (App.E.campos && App.E.campos.porTipo && App.E.campos.porTipo[tipo]) || [];
+  /* Fila 245: más los «solo aquí» de la ficha del asunto. */
+  config = Campos.camposDeAsunto(config, ficha);
+  if (!config.length) return { html: '', items: [] };
+
+  var items = config.map(function (cfg) {
+    var clave = Campos.claveDeCampo(cfg);
+    var g = (guardados && guardados[clave]) || {};
+    /* Igual que al crear el asunto: la clase y los valores de un
+       campo propio de lista viven en `propios`, no en `porTipo`. */
+    var cfgParaPintar = cfg;
+    if (cfg.origen === 'propio') {
+      var p = Campos.propioDe(cfg.id, App.E.campos);
+      if (p) cfgParaPintar = Object.assign({}, cfg, { clase: p.clase, valores: p.valores });
+    }
+    return { cfg: cfgParaPintar, clave: clave, nombre: Campos.nombreDeCampo(cfg, App.E.campos),
+             valor: g.valor || '', enNombre: cfg.soloAqui ? false : !!g.enNombre, soloAqui: !!cfg.soloAqui,
+             clase: (cfg.origen === 'propio' && cfgParaPintar.clase) ? cfgParaPintar.clase : 'texto' };
+  });
+
+  var filas = items.map(function (it, i) {
+    var idBase = 'ed-campo-' + i;
+    /* Fila 244: el control según la clase (lista, fecha, importe, número o texto). */
+    var control = CamposClases.htmlControl(idBase, it.clase, it.cfg.valores, it.valor);
+    return '<div class="campo-fila">' +
+      '<label class="etiqueta">' + U.escapar(it.nombre) + (it.cfg.obligatorio ? ' *' : '') +
+        (it.soloAqui ? ' <span class="marca-solo-aqui">solo aquí</span>' : '') +
+        (it.cfg.hito ? ' <span class="marca-hito">' + U.escapar(tituloDeHito(nombreAsunto, it.cfg.hito)) + '</span>' : '') + '</label>' +
+      control +
+      '</div>';
+  }).join('');
+
+  return {
+    html: '<label class="etiqueta">Datos del asunto</label>' +
+          '<div id="ed-campos" class="campos-lista' + (items.length > 1 ? ' campos-en-dos' : '') + '">' + filas + '</div>',
+    items: items
+  };
+};
+
+/* Cuando llega el Nº de identificación escolar de un aspirante (fila 42), o cambia
+   cualquier dato que va en el nombre del tercero (fila 266), las carpetas de sus
+   asuntos abiertos cambian de nombre: js/tercero-renombrar.js. */
+
+/* Fila 219, punto 4: dar de alta a alguien nuevo desde el buscador de
+   este cuadro no puede abrir un segundo U.preguntar mientras el de
+   «Cambiar el asunto» sigue esperando (se roban uno a otro, ver
+   js/asuntos-editar-tercero.js). En vez de eso, abrirCuadroDeEdicion
+   cierra su propio cuadro con el botón Cancelar de siempre (ordenado,
+   sin robar nada) y devuelve `{ pedirAlta, snapshot }`; App.editarAsunto
+   hace el alta ya con el camino libre y vuelve a abrir el mismo cuadro
+   con `snapshot` (todo lo que se hubiera tocado, más el recién creado
+   ya elegido). */
+App.editarAsunto = async function (a) {
+  var p = App.piezasDelAsunto(a);
+  var base = null;   /* null = valores del propio asunto (p); si no, un snapshot de una vuelta anterior */
+
+  while (true) {
+    var r = await abrirCuadroDeEdicion(a, p, base);
+    if (r.pedirAlta) {
+      var creada = null;
+      await App.altaTercero(r.pedirAlta.categoria, r.pedirAlta.texto, function (nueva) { creada = nueva; });
+      base = r.snapshot;
+      if (creada) base.terceroElegido = creada;
+      continue;
+    }
+    if (r.pedirTipo) {
+      var creado = await TipoEnLinea.crearDesdeEdicion(r.pedirTipo.nombre, r.pedirTipo.categoria);
+      base = r.snapshot;
+      if (creado) base.tipo = creado;
+      continue;
+    }
+    if (!r.ok) return;
+    /* Mientras se guarda, el asunto está ocupado (fila 100): ni
+       archivar ni volver a editar hasta que termine. Devuelve el
+       nombre con que queda el asunto si ha salido bien (fila 119). */
+    return await App.conOcupado(a.nombre, function () { return guardarEdicion(a, p, r.d, r.nombreNuevo, r.datos); });
+  }
+};
+
+async function abrirCuadroDeEdicion(a, p, base) {
+  var v = base || p;   /* de dónde salen los valores de partida del cuadro */
+  var bloqueCampos = App.pintarCamposEditar(v.tipo, base ? base.campos : p.campos, a.ficha, a.nombre);
+
+  /* Con los campos del tipo de más, el cuadro puede quedarse más alto
+     que la pantalla: se deja bajar por dentro, para que el botón de
+     Guardar siga alcanzable. */
+  var cuadroEditar = document.querySelector('#capa .cuadro');
+  if (cuadroEditar) cuadroEditar.classList.add('cuadro-alto', 'cuadro-editar');   /* fila 257: más ancho y compacto */
+
+  var terceroElegidoInicial = base ? base.terceroElegido : null;
+  var departamentoInicialHtml = (terceroElegidoInicial && window.AdministracionesFicha)
+    ? AdministracionesFicha.htmlDepartamento(AdministracionesFicha.organismoDePersona(terceroElegidoInicial), '')
+    : (window.AdministracionesFicha ? AdministracionesFicha.htmlEditar(a) : '');   /* fila 167 */
+
+  var promesa = U.preguntar('Cambiar el asunto',
+    '<p class="explica">Al guardar se le cambia el nombre a la carpeta. ' +
+    'Se copia primero y se comprueba que ha llegado todo; si algo fallara, ' +
+    'la carpeta se queda como está.</p>' +
+    /* Fila 257: fecha, grupo y año en una fila; el tipo, en una línea con «Cambiar» (js/tipo-en-linea.js). */
+    '<div class="tres-columnas">' +
+      '<div><label class="etiqueta">Fecha de inicio</label>' +
+      '<input id="ed-fecha" type="date" class="campo" value="' + U.escapar(v.fecha) + '"></div>' +
+      '<div><label class="etiqueta">Grupo <span class="suave">(opcional)</span></label>' +
+      '<input id="ed-grupo" class="campo" value="' + U.escapar(v.grupo) + '" placeholder="1ºA"></div>' +
+      '<div><label class="etiqueta">Año académico <span class="suave">(opcional)</span></label>' +
+      '<input id="ed-curso" class="campo" value="' + U.escapar(v.curso) + '" placeholder="26-27"></div>' +
+    '</div>' +
+    '<label class="etiqueta">Descripción corta <span class="suave">(opcional)</span></label>' +
+    '<input id="ed-descripcion" class="campo" value="' + U.escapar(v.descripcion) + '">' +
+    '<label class="etiqueta">Tipo de asunto</label>' +
+    '<input id="ed-tipo" type="hidden" value="' + U.escapar(v.tipo) + '">' +
+    '<div id="ed-tipo-caja"></div>' +
+    '<p id="ed-aviso-categoria" class="aviso aviso-ambar oculto"></p>' +   /* fila 219, punto 6 */
+    bloqueCampos.html +
+    '<label class="etiqueta">Tercero</label>' +
+    '<div id="ed-tercero-caja"></div>' +   /* fila 219: buscador, ya no texto libre */
+    '<div id="ed-departamento-caja">' + departamentoInicialHtml + '</div>' +
+    '<div class="vista-previa">' +
+      '<div class="vista-rotulo">Se llamará</div>' +
+      '<div id="ed-vista" class="vista-nombre"></div>' +
+      '<div class="vista-ruta">Ahora se llama: ' + U.escapar(a.nombre) + '</div>' +
+    '</div>', 'Guardar');
+
+  var itemsCampos = bloqueCampos.items;
+
+  /* Fila 244: `valorEditado` es lo que se guarda (importe `1234.50`, fecha `AAAA-MM-DD`); `textoEditado`,
+     lo que se ve y va al nombre; `valorBruto`, lo escrito tal cual (para volver a pintarlo). */
+  function valorEditado(item, i) {
+    return CamposClases.leerControl($('ed-campo-' + i), item.clase).valor;
+  }
+  function textoEditado(item, i) {
+    return CamposClases.leerControl($('ed-campo-' + i), item.clase).texto;
+  }
+  function valorBruto(i) {
+    var el = $('ed-campo-' + i);
+    return el ? (el.value || '').trim() : '';
+  }
+  /* Fila 251: los campos no entran en ningún nombre. Lo que un asunto de
+     antes ya llevara en el suyo se queda como estaba (la marca guardada
+     no se toca, y el valor que cuenta es el guardado, no el editado). */
+  function enNombreEditado(i) {
+    return !!itemsCampos[i].enNombre;
+  }
+
+  function camposParaNombre() {
+    return itemsCampos
+      .map(function (item, i) { return { valor: item.valor ? Campos.mostrarValor(item.clase, item.valor) : '', enNombre: enNombreEditado(i) }; })
+      .filter(function (v) { return v.enNombre && v.valor; })
+      .map(function (v) { return v.valor; });
+  }
+
+  /* Sin elegir otro tercero en el buscador, el nombre sigue con el
+     texto de siempre (punto 3 de la fila 219): guardar sin tocarlo no
+     cambia el tercero, aunque sea un asunto antiguo que ya no
+     encuentre a nadie parecido en las listas de hoy. */
+  function piezasDelCuadro() {
+    var elegido = controlesTercero.terceroElegido();
+    return {
+      fecha: $('ed-fecha').value,
+      tipo: $('ed-tipo').value,
+      curso: $('ed-curso').value.trim(),
+      grupo: $('ed-grupo').value.trim(),
+      campos: camposParaNombre(),
+      descripcion: $('ed-descripcion').value.trim(),
+      tercero: elegido ? App.textoTercero(elegido) : p.tercero,
+      numero: p.numero,   /* fila 239: el mismo de siempre */
+      categoria: elegido ? elegido.categoria : p.categoria
+    };
+  }
+
+  /* Punto 6 de la fila 219: si el tercero elegido es de otra categoría
+     que el tipo, un aviso ámbar junto al tipo, sin impedir guardar. */
+  function refrescarAvisoCategoria() {
+    var caja = $('ed-aviso-categoria');
+    var elegido = controlesTercero.terceroElegido();
+    var tipo = $('ed-tipo').value;
+    var clasesTipo = tipo ? Nombres.categoriasDeTipo(App.E.tipos, tipo) : [];
+    /* Fila 604: solo avisa si la clase del tercero no es NINGUNA de las del tipo. */
+    if (!elegido || !clasesTipo.length || clasesTipo.indexOf(elegido.categoria) !== -1) {
+      caja.classList.add('oculto');
+      caja.textContent = '';
+      return;
+    }
+    caja.classList.remove('oculto');
+    caja.textContent = 'Este tipo es de ' + clasesTipo.map(function (c) { return Nombres.textoCategoria(c, 'lista'); }).join(' · ') + '; ' +
+      App.textoTercero(elegido) + ' es de ' + Nombres.textoCategoria(elegido.categoria, 'lista') +
+      '. Cambia el tipo si no encaja.';
+  }
+
+  /* Punto 7: el desplegable de departamento se rehace para el
+     organismo recién elegido (o desaparece si ya no es de
+     Administraciones). Solo al elegir otro tercero, nunca en cada
+     tecla de los demás campos: si no, se perdería lo ya elegido en el
+     propio desplegable. Sin tocar el tercero se deja tal cual se montó
+     al abrir el cuadro. */
+  function refrescarDepartamento() {
+    if (!window.AdministracionesFicha) return;
+    var elegido = controlesTercero.terceroElegido();
+    if (!elegido) return;
+    var o = AdministracionesFicha.organismoDePersona(elegido);
+    $('ed-departamento-caja').innerHTML = AdministracionesFicha.htmlDepartamento(o, '');
+  }
+
+  function refrescar() {
+    var r = nombreConTipoCortoAjustado(piezasDelCuadro());
+    $('ed-vista').textContent = r.nombre;
+    Nombres.avisoRecorte($('ed-vista'), r.recortado, r.noCabe, 'cambio');   /* filas 130, 177 y 263 */
+    refrescarAvisoCategoria();
+  }
+
+  /* Punto 4: «Dar de alta» no llama a App.altaTercero desde aquí (ver
+     la cabecera de js/asuntos-editar-tercero.js): se guarda qué se
+     pedía y se cierra este cuadro con su propio Cancelar, ordenado. */
+  var pedirAltaPendiente = null, snapshotPendiente = null;
+  function snapshotDelCuadro() {
+    var camposObjeto = {};
+    itemsCampos.forEach(function (item, i) {
+      camposObjeto[item.clave] = { valor: valorBruto(i), enNombre: enNombreEditado(i) };
+    });
+    return {
+      fecha: $('ed-fecha').value, tipo: $('ed-tipo').value, curso: $('ed-curso').value.trim(),
+      grupo: $('ed-grupo').value.trim(), descripcion: $('ed-descripcion').value.trim(),
+      campos: camposObjeto, terceroElegido: controlesTercero.terceroElegido()
+    };
+  }
+  function pedirAlta(categoria, texto) {
+    pedirAltaPendiente = { categoria: categoria, texto: texto };
+    snapshotPendiente = snapshotDelCuadro();
+    $('cuadro-cancelar').click();
+  }
+
+  /* Fila 257: «Ninguno es el que busco: crear…» se hace igual que el alta
+     de tercero: este cuadro se cierra solo, se crea el tipo y se vuelve a
+     abrir con todo lo escrito y el tipo nuevo ya elegido. */
+  var pedirTipoPendiente = null;
+  function pedirTipoNuevo(nombre) {
+    var actual = $('ed-tipo').value;
+    pedirTipoPendiente = { nombre: nombre, categoria: Nombres.categoriaDeTipo(App.E.tipos, actual) || p.categoria };
+    snapshotPendiente = snapshotDelCuadro();
+    $('cuadro-cancelar').click();
+  }
+  TipoEnLinea.montar($('ed-tipo-caja'), {
+    prefijo: 'ed-tipo', tipo: v.tipo, categoria: null,
+    alElegir: function (t) { $('ed-tipo').value = t.tipo; refrescar(); },
+    alCrear: pedirTipoNuevo
+  });
+
+  var controlesTercero = App.montarTerceroEditar($('ed-tercero-caja'), p.tercero, function () {
+    refrescar();
+    refrescarDepartamento();
+  }, pedirAlta, terceroElegidoInicial);
+  /* Fila 293: en un asunto de grupo, en vez del buscador de personas, el nombre del grupo. */
+  if (window.AsuntoDeGrupo && AsuntoDeGrupo.esGrupo(a)) controlesTercero = AsuntoDeGrupo.montarEditar($('ed-tercero-caja'), a, refrescar);
+
+  ['ed-fecha', 'ed-curso', 'ed-tipo', 'ed-grupo', 'ed-descripcion']
+    .forEach(function (id) { $(id).oninput = refrescar; $(id).onchange = refrescar; });
+  itemsCampos.forEach(function (item, i) {
+    var el = $('ed-campo-' + i);
+    if (el) { el.oninput = refrescar; el.onchange = refrescar; CamposClases.engancharControl(el, item.clase, refrescar); }
+  });
+  refrescar();
+
+  var ok = await promesa;
+  if (cuadroEditar) cuadroEditar.classList.remove('cuadro-alto', 'cuadro-editar');
+  if (pedirAltaPendiente) return { pedirAlta: pedirAltaPendiente, snapshot: snapshotPendiente };
+  if (pedirTipoPendiente) return { pedirTipo: pedirTipoPendiente, snapshot: snapshotPendiente };
+  if (!ok) return { ok: false };
+
+  /* Obligatorio quiere decir que el asunto no se guarda sin él, igual
+     que al crearlo. */
+  for (var i = 0; i < itemsCampos.length; i++) {
+    if (itemsCampos[i].cfg.obligatorio && !valorEditado(itemsCampos[i], i)) {
+      U.aviso('Hace falta rellenar "' + itemsCampos[i].nombre + '".', 'malo');
+      return { ok: false };
+    }
+  }
+
+  /* Fila 244: un importe, número o fecha que no se entiende no se guarda hasta corregirlo. */
+  for (var j = 0; j < itemsCampos.length; j++) {
+    if (!CamposClases.leerControl($('ed-campo-' + j), itemsCampos[j].clase).ok) {
+      U.aviso('Revisa "' + itemsCampos[j].nombre + '": ' + CamposClases.avisoDeAmbar(itemsCampos[j].clase) + '.', 'malo');
+      return { ok: false };
+    }
+  }
+
+  var d = piezasDelCuadro();
+  if (!d.tercero) { U.aviso('Hace falta el tercero: va siempre al final del nombre.', 'malo'); return { ok: false }; }
+  var ajustadoFinal = nombreConTipoCortoAjustado(d);
+  var nombreNuevo = ajustadoFinal.nombre;
+  if (!nombreNuevo || nombreNuevo.length < 8) { U.aviso('Ese nombre se queda demasiado corto.', 'malo'); return { ok: false }; }
+  /* Fila 263: una ruta larga avisa en ámbar (vista previa), pero no impide guardar. */
+
+  var camposGuardados = {};
+  itemsCampos.forEach(function (item, i) {
+    camposGuardados[item.clave] = { valor: valorEditado(item, i), enNombre: enNombreEditado(i) };
+  });
+
+  var datos = {
+    tipo: d.tipo, categoria: Nombres.categoriaDeTipo(App.E.tipos, d.tipo),
+    tercero: d.tercero, curso: d.curso, grupo: d.grupo, descripcion: d.descripcion,
+    campos: camposGuardados,
+    editadoEl: U.ahora(), editadoPor: App.E.usuario
+  };
+  /* Punto 8 de la fila 219: sin tocar el tercero, nada de esto se toca
+     (App.anotar solo funde las claves presentes en `datos`). Al elegir
+     otro, se pone al día igual que al crear un asunto nuevo: la foto
+     de contacto (fila 66) y el departamento (fila 167, del organismo
+     recién elegido, o se limpia si ya no es de Administraciones). */
+  var elegido = controlesTercero.terceroElegido();
+  /* Fila 493: la clase guardada es la del tercero (elegido ahora, o el que ya tenía) si el tipo la admite; si no, la primera del tipo. */
+  var clasesDelTipo = Nombres.categoriasDeTipo(App.E.tipos, d.tipo);
+  var claseDelTercero = elegido ? elegido.categoria : (a.ficha && a.ficha.categoria);
+  if (claseDelTercero && clasesDelTipo.indexOf(claseDelTercero) !== -1) datos.categoria = claseDelTercero;
+  if (window.AsuntoDeGrupo && AsuntoDeGrupo.esGrupo(a)) datos.grupo = AsuntoDeGrupo.grupoRenombrado(a, elegido);   /* fila 293: sigue siendo un objeto */
+  else if (elegido) datos.contacto = Datos.fotoDeContacto(elegido, elegido.categoria);
+  var organismoNuevo = (elegido !== null && window.AdministracionesFicha)
+    ? AdministracionesFicha.organismoDePersona(elegido) : undefined;
+  var departamento = window.AdministracionesFicha ? AdministracionesFicha.leerEditar(a, organismoNuevo) : undefined;
+  if (departamento !== undefined) datos.departamento = departamento;   /* fila 167; null lo quita */
+
+  return { ok: true, d: d, nombreNuevo: nombreNuevo, datos: datos };
+}
+
+/* Lo principal (la carpeta y la ficha) y lo accesorio (la lista, la
+   guía) por separado (fila 100, docs/AVISOS-QUE-DICEN-LA-VERDAD.md). */
+async function guardarEdicion(a, p, d, nombreNuevo, datos) {
+  if (nombreNuevo === a.nombre) {
+    try { await App.anotar(a.nombre, datos); }
+    catch (e) { U.fallo('No se ha podido cambiar', e); return; }
+    U.aviso('Asunto actualizado.', 'bueno');
+    /* Fila 408: el tipo ha cambiado pero el nombre sale igual (los dos tipos se escriben igual en la
+       carpeta): no se renombra nada, y se dice, para que no parezca que no se ha hecho. */
+    if (p.tipo !== d.tipo) U.aviso('El tipo ha cambiado, pero la carpeta se queda con el mismo nombre: los dos tipos se escriben igual en ella.', 'ambar');
+    try { await App.verAbiertos(); }
+    catch (e2) { U.accesorio('Asunto actualizado, pero no he podido poner la lista al día. Pulsa Recargar', e2); }
+    await ofrecerGuiaNueva(a.nombre, p.tipo, d.tipo);
+    if (window.PorLiquidar) await PorLiquidar.alCambiarTipo(a.nombre, p.tipo, d.tipo);   /* fila 253 */
+    return a.nombre;
+  }
+  try {
+    if (await Carpetas.existe(App.E.abiertos, nombreNuevo)) {
+      U.aviso('Ya hay otro asunto abierto que se llama así.', 'malo');
+      return;
+    }
+    /* Fila 266: la ficha abierta sigue al asunto con su nombre nuevo, sin aviso rojo (js/ficha-huella.js). */
+    (App.E.recienRenombrados = App.E.recienRenombrados || {})[a.nombre] = nombreNuevo;
+    await Carpetas.renombrar(App.E.abiertos, a.nombre, nombreNuevo);
+  } catch (e) {
+    if (App.E.recienRenombrados) delete App.E.recienRenombrados[a.nombre];
+    U.fallo('No se ha podido cambiar', e);
+    return;
+  }
+
+  /* La carpeta ya se llama como se quería. La ficha viaja con ella, y
+     con ella sus hitos y la señal de presencia si la hubiera (fila 62,
+     docs/RENOMBRAR-SIN-PERDER-HITOS.md): AsuntoRenombrar.mover es el
+     único sitio que mueve las tres cosas a la vez. */
+  try {
+    await AsuntoRenombrar.mover(a.nombre, nombreNuevo, datos);
+  } catch (e) {
+    U.accesorio('La carpeta ya se llama como querías, pero no he podido mover su ficha o sus hitos. ' +
+      'Pulsa Recargar y míralo', e);
+    try { await App.verAbiertos(); } catch (e2) { /* solo pintar */ }
+    return;
+  }
+  U.aviso('Asunto editado. La carpeta ya se llama como querías.', 'bueno');
+  try { await App.verAbiertos(); }
+  catch (e3) { U.accesorio('Asunto editado, pero no he podido poner la lista al día. Pulsa Recargar', e3); }
+  await ofrecerGuiaNueva(nombreNuevo, p.tipo, d.tipo);
+  if (window.PorLiquidar) await PorLiquidar.alCambiarTipo(nombreNuevo, p.tipo, d.tipo);   /* fila 253 */
+  return nombreNuevo;
+}
+
+/* Solo cuando la carpeta y la ficha ya han salido bien (fila 94,
+   docs/CAMBIAR-EL-TIPO-CAMBIA-LA-GUIA.md): si el tipo ha cambiado,
+   ofrecer la guía del tipo nuevo. Si esto falla, el asunto ya está
+   editado: se avisa y no se deshace nada. */
+async function ofrecerGuiaNueva(clave, tipoViejo, tipoNuevo) {
+  if (!window.HitosCambioDeTipo || tipoViejo === tipoNuevo) return;
+  try {
+    await HitosCambioDeTipo.ofrecer(clave, tipoViejo, tipoNuevo);
+  } catch (e) {
+    U.aviso('El asunto está editado, pero no he podido traer la guía nueva: ' + U.mensajeDeError(e), 'ambar');
+  }
+}

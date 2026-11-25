@@ -1,0 +1,356 @@
+/* ============================================================
+   alumnado-bd.js — el alumnado de la base de datos de alumnado, desde
+   la carpeta de Drive (fila 144, 25-sep-2026,
+   docs/ALUMNADO-BD-DESDE-DRIVE.md; el acuerdo entre las dos
+   aplicaciones, versión 2, en docs/ACUERDO-ALUMNADO.md). Sustituye el
+   camino por dirección web de la fila 142: aquí no hay `fetch`, ni
+   dirección, ni clave.
+
+   - La carpeta: la «Datos de matrícula» que Google Drive para ordenador
+     enseña en el ordenador. Se señala en Ajustes › El centro › «Carpeta
+     de la base de datos de alumnado» y se recuerda en este ordenador
+     (Almacen, `alumnado-bd-carpeta`), como las del Dropbox.
+   - Traer: al entrar y con «Traer el alumnado ahora» (Mantenimiento).
+     Si la carpeta está señalada y su `ALUMNADO-BD.json` es más nuevo
+     (`generado`) que la copia, se valida y se copia a
+     `_GESTOR/datos/ALUMNADO-BD.json` por ColaGuardado. Sin carpeta (el
+     compañero), la copia tal cual. Si no vale, la copia y ámbar.
+   - Todo genérico, guiado por `campos`: ningún dato con nombre propio,
+     salvo `idEscolar` y `matriculado`. La copia se lee una vez y queda
+     en memoria.
+   - Unir (lo llama js/datos-alumnado.js): el RegAlum sigue siendo la
+     base; el archivo suma datos por Nº escolar y, si no es más viejo
+     que el RegAlum, manda en `matriculado` y en las columnas del RegAlum
+     que se llamen igual que una `etiqueta`.
+   - Lo que se ve (tarjetas por apartado, huecos, grupos), en
+     js/alumnado-bd-ver.js.
+   ============================================================ */
+var AlumnadoBD = (function () {
+
+  var FICHERO = 'ALUMNADO-BD.json';
+  var ACUERDO = 2;
+  var CLAVE_CARPETA = 'alumnado-bd-carpeta';
+  var memoria = null;       /* la copia válida, leída una vez: { datos } o { datos: null } */
+  var avisadoFallo = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ---------- validar (puro) ---------- */
+
+  function validar(datos) {
+    if (!datos || typeof datos !== 'object') return { ok: false, motivo: 'no es un archivo de la base de datos de alumnado' };
+    if (datos.acuerdo !== ACUERDO) return { ok: false, motivo: 'viene con el acuerdo ' + datos.acuerdo + ', y este gestor conoce el ' + ACUERDO };
+    if (!Array.isArray(datos.campos)) return { ok: false, motivo: 'no trae la lista de campos' };
+    if (!Array.isArray(datos.alumnos)) return { ok: false, motivo: 'no trae la lista de alumnos' };
+    var sinId = datos.alumnos.filter(function (a) { return !a || !String(a.idEscolar || '').trim(); }).length;
+    if (sinId) return { ok: false, motivo: sinId + (sinId === 1 ? ' alumno viene' : ' alumnos vienen') + ' sin Nº de identificación escolar' };
+    return { ok: true };
+  }
+
+  /* Plan del núcleo (fila 323): quién hizo la copia. Solo dice «Centro de datos»
+     si `origen` es `centro-de-datos-ies`; con otro valor, o ninguno, '' (como hoy). */
+  function hechoPor(datos) {
+    return datos && datos.origen === 'centro-de-datos-ies' ? 'Centro de datos' : '';
+  }
+
+  function fecha(iso) {
+    var f = new Date(iso || '');
+    return isNaN(f.getTime()) ? null : f;
+  }
+
+  function fechaLegible(iso) {
+    var s = String(iso || '').slice(0, 10).split('-');
+    return s.length === 3 ? s[2] + '-' + s[1] + '-' + s[0] : '';
+  }
+
+  /* ---------- la copia del Dropbox, en memoria ---------- */
+
+  async function leer() {
+    if (memoria) return memoria.datos;
+    var dir = App.E && App.E.datos;
+    if (!dir) return null;
+    var datos = null;
+    try { datos = await Carpetas.leerJson(dir, FICHERO); } catch (e) { datos = null; }
+    memoria = { datos: datos && validar(datos).ok ? datos : null };
+    return memoria.datos;
+  }
+
+  /* Lo que ya esté en memoria, sin leer (para lo que no puede esperar). */
+  function enMemoria() { return memoria ? memoria.datos : null; }
+
+  function olvidar() {
+    memoria = null;
+    if (window.Datos && Datos.olvidar) Datos.olvidar('ALUMNADO');
+    if (window.TablasDatos && TablasDatos.olvidar) TablasDatos.olvidar();
+  }
+
+  async function guardar(datos) {
+    var dir = App.E.datos;
+    if (!dir) throw new Error('No está señalada la carpeta de datos.');
+    var hacer = function () { return Carpetas.escribirTexto(dir, FICHERO, JSON.stringify(datos)); };
+    await (window.ColaGuardado ? ColaGuardado.poner(FICHERO, hacer) : hacer());
+    olvidar();
+    memoria = { datos: datos };
+  }
+
+  /* ---------- la carpeta de Drive (de este ordenador) ---------- */
+
+  async function carpeta() {
+    try { return (await Almacen.leer(CLAVE_CARPETA)) || null; } catch (e) { return null; }
+  }
+
+  async function permiso(dir, pedir) {
+    var op = { mode: 'read' };
+    try {
+      if ((await dir.queryPermission(op)) === 'granted') return true;
+      if (!pedir) return false;
+      return (await dir.requestPermission(op)) === 'granted';
+    } catch (e) { return false; }
+  }
+
+  async function senalarCarpeta() {
+    try {
+      var h = await window.showDirectoryPicker({ id: 'gestor-alumnado-bd', mode: 'read' });
+      await Almacen.guardar(CLAVE_CARPETA, h);
+      pintarAjustes();
+      U.aviso('Carpeta de la base de datos de alumnado señalada: ' + h.name, 'bueno');
+      await traer(false, true);
+      pintarCopia();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      U.fallo('No he podido usar esa carpeta', e);
+    }
+  }
+
+  async function olvidarCarpeta() {
+    try { await Almacen.guardar(CLAVE_CARPETA, null); } catch (e) { /* nada */ }
+    pintarAjustes();
+  }
+
+  /* ---------- traer ---------- */
+
+  /* Fila 319: por dónde llegó la copia (js/datos-que-tengo.js). La fecha y la marca son su `generado`. */
+  function apuntarOrigen(nuevo, origen) {
+    if (!window.DatosQueTengo) return Promise.resolve();
+    return DatosQueTengo.apuntar(FICHERO, Object.assign({ fechaOriginal: nuevo.generado, marca: nuevo.generado }, origen));
+  }
+
+  /* Devuelve { ok, copiado, cuantos, generado } o { ok: false, motivo }.
+     `avisar`: avisos verdes (el botón). `pedir`: puede pedir permiso
+     (solo tras un clic). */
+  async function traer(avisar, pedir) {
+    var dir = await carpeta();
+    if (!dir) return { ok: false, motivo: 'sin carpeta' };
+    if (!(await permiso(dir, pedir))) return { ok: false, motivo: 'sin permiso' };
+    try {
+      var nuevo = await Carpetas.leerJson(dir, FICHERO);
+      if (!nuevo) throw new Error('no encuentro ' + FICHERO + ' en la carpeta ' + dir.name);
+      var v = validar(nuevo);
+      if (!v.ok) throw new Error('el archivo no vale: ' + v.motivo);
+      var copia = await leer();
+      var fn = fecha(nuevo.generado), fc = copia && fecha(copia.generado);
+      if (copia && fc && fn && fn <= fc) {
+        if (avisar) U.aviso('El alumnado ya estaba al día (datos del ' + fechaLegible(copia.generado) + ').', 'bueno');
+        return { ok: true, copiado: false, cuantos: copia.alumnos.length, generado: copia.generado };
+      }
+      await guardar(nuevo);
+      await apuntarOrigen(nuevo, { via: 'carpeta-bd' });
+      if (avisar) U.aviso('Alumnado traído: ' + nuevo.alumnos.length + ' alumnos, datos del ' + fechaLegible(nuevo.generado) + '.', 'bueno');
+      return { ok: true, copiado: true, cuantos: nuevo.alumnos.length, generado: nuevo.generado };
+    } catch (e) {
+      if (!avisadoFallo || avisar) {
+        avisadoFallo = true;
+        U.accesorio('No he podido traer el alumnado de la base de datos; sigo con la última copia', e);
+      }
+      return { ok: false, motivo: U.mensajeDeError(e) };
+    }
+  }
+
+  /* Fila 312: un archivo ya leído (de la carpeta del Centro de datos): misma validación, misma copia y
+     nunca uno más viejo que el que hay. Devuelve { copiado, cuantos, generado }; si no vale, lanza. */
+  async function aceptar(nuevo, origen) {
+    var v = validar(nuevo);
+    if (!v.ok) throw new Error('el archivo no vale: ' + v.motivo);
+    var copia = await leer();
+    var fn = fecha(nuevo.generado), fc = copia && fecha(copia.generado);
+    if (copia && fc && fn && fn <= fc) return { copiado: false, cuantos: copia.alumnos.length, generado: copia.generado };
+    await guardar(nuevo);
+    await apuntarOrigen(nuevo, origen || { via: 'centro-de-datos' });
+    return { copiado: true, cuantos: nuevo.alumnos.length, generado: nuevo.generado };
+  }
+
+  /* Fila 319: lo que hay en la carpeta señalada, sin pedir permiso ni copiar nada.
+     { sinCarpeta } | { sinPermiso } | { hay, valido, motivo, generado, cuantos }. */
+  async function mirarCarpeta() {
+    var dir = await carpeta();
+    if (!dir) return { sinCarpeta: true };
+    if (!(await permiso(dir, false))) return { sinPermiso: true };
+    var j;
+    try { j = await Carpetas.leerJson(dir, FICHERO); }
+    catch (e) { return { hay: true, valido: false, motivo: 'no se puede leer (' + U.mensajeDeError(e) + ')', generado: '', cuantos: 0 }; }
+    if (!j) return { hay: false };
+    var v = validar(j);
+    return { hay: true, valido: v.ok, motivo: v.ok ? '' : v.motivo, generado: j.generado || '', cuantos: Array.isArray(j.alumnos) ? j.alumnos.length : 0 };
+  }
+
+  /* La fila 142 guardaba una dirección en asuntos.json: fuera. */
+  function quitarDireccionVieja() {
+    var r = App.E.registro;
+    if (!r || !r.ajustesAlumnadoBD) return;
+    Promise.resolve(App.guardarRegistroFresco(function (registro) { delete registro.ajustesAlumnadoBD; })).catch(function () {});
+  }
+
+  var yaMirado = false;
+  function alEntrar() {
+    if (yaMirado || !App.E || !App.E.datos || !App.E.registro) return;
+    yaMirado = true;
+    quitarDireccionVieja();
+    setTimeout(async function () {
+      await leer();
+      var r = await traer(false, false);
+      if (r.copiado) pintarCopia();
+    }, 1500);
+  }
+
+  /* ---------- unir con el RegAlum (lo llama js/datos-alumnado.js) ---------- */
+
+  function porClave(datos) {
+    var m = {};
+    ((datos && datos.campos) || []).forEach(function (c) { if (c && c.clave) m[c.clave] = c; });
+    return m;
+  }
+
+  /* `lista` y `porId` de js/datos-alumnado.js; `fechaRegAlum`, la del
+     RegAlum (o null). Devuelve { generado, unidos, cuantos, manda } o null. */
+  async function unir(lista, porId, fechaRegAlum) {
+    var datos = await leer();
+    if (!datos) return null;
+    var fg = fecha(datos.generado);
+    var manda = !fechaRegAlum || isNaN(fechaRegAlum.getTime()) || !fg || fg >= fechaRegAlum;
+    var campos = porClave(datos);
+    var unidos = 0;
+    datos.alumnos.forEach(function (a) {
+      var p = porId && porId[String(a.idEscolar).trim()];
+      if (!p) return;
+      unidos++;
+      p.bd = a.datos || {};
+      p.bdGenerado = datos.generado || '';
+      if (manda && typeof a.matriculado === 'boolean' && a.matriculado !== p.matriculado) {
+        p.matriculado = a.matriculado;
+        if (!a.matriculado) { p.unidad = ''; p.curso = ''; }
+      }
+      /* Las columnas del RegAlum que se llaman igual que un dato. */
+      var columnas = {};
+      Object.keys(p.campos || {}).forEach(function (k) { columnas[U.normalizar(k)] = k; });
+      Object.keys(p.bd).forEach(function (clave) {
+        var c = campos[clave], v = p.bd[clave];
+        if (!c || v === null || v === undefined || typeof v === 'object') return;
+        var col = columnas[U.normalizar(c.etiqueta || '')];
+        if (col && (manda || !p.campos[col])) p.campos[col] = String(v);
+      });
+    });
+    return { generado: datos.generado || '', unidos: unidos, cuantos: datos.alumnos.length, manda: manda };
+  }
+
+  /* La fecha `generado`, para el aviso de frescura. */
+  async function fechaGenerado() {
+    var d = await leer();
+    return d ? fecha(d.generado) : null;
+  }
+
+  /* ---------- Ajustes ---------- */
+
+  function bloque(id, titulo, pie, cuerpo) {
+    var det = document.createElement('details');
+    det.className = 'bloque-ajustes';
+    det.id = id;
+    det.innerHTML = '<summary><span class="bloque-titulo">' + titulo + '</span><span class="bloque-pie">' + pie + '</span></summary>' +
+      '<div class="bloque-cuerpo">' + cuerpo + '</div>';
+    return det;
+  }
+
+  async function pintarAjustes() {
+    var centro = $('ajustes-tab-centro');
+    if (centro && !$('bloque-alumnado-bd')) {
+      var det = bloque('bloque-alumnado-bd', 'Carpeta de la base de datos de alumnado', 'De dónde sale el alumnado de la base de datos, en este ordenador',
+        '<p class="explica">Señala la carpeta de Google Drive para ordenador que tiene ' +
+        '<code>' + FICHERO + '</code>: la deja ahí la base de datos de alumnado. Es de este ordenador, como las de la nube: el otro usa la copia.</p>' +
+        '<p class="explica" id="alumnado-bd-carpeta"></p>' +
+        '<div class="aviso aviso-ambar oculto" id="alumnado-bd-aviso"></div>' +
+        '<div class="alta-tipo"><button type="button" class="boton" id="alumnado-bd-senalar">Señalar la carpeta</button>' +
+        '<button type="button" class="boton" id="alumnado-bd-olvidar">Olvidarla</button></div>' +
+        '<p class="explica alumnado-bd-copia"></p>' +
+        '<p class="explica"><button type="button" class="enlace" id="alumnado-enlace-lo-que-tengo">Ver todo lo que tengo</button></p>');
+      var datosCaja = $('estado-datos');
+      var ancla = datosCaja && datosCaja.closest('details');
+      if (ancla && ancla.parentNode === centro) centro.insertBefore(det, ancla.nextSibling); else centro.appendChild(det);
+      $('alumnado-bd-senalar').onclick = senalarCarpeta;
+      $('alumnado-bd-olvidar').onclick = olvidarCarpeta;
+      $('alumnado-enlace-lo-que-tengo').onclick = function () { if (App.irASeccionDeAjustes) App.irASeccionDeAjustes($('bloque-traer-alumnado')); };
+    }
+    /* Fila 200, apartado 7: este botón ya no crea su propio <details>
+       en Ajustes → Mantenimiento; se cuelga, sin envoltorio propio,
+       dentro del bloque "Traer el alumnado" de Herramientas (junto al
+       botón de Séneca de js/traer-datos.js). */
+    var mant = $('herramientas-traer-alumnado-bd');
+    if (mant && !$('bloque-alumnado-bd-traer')) {
+      var envoltorio = document.createElement('div');
+      envoltorio.id = 'bloque-alumnado-bd-traer';
+      envoltorio.innerHTML = '<button type="button" class="boton" id="alumnado-bd-traer">Traer el alumnado ahora</button>';
+      mant.appendChild(envoltorio);
+      $('alumnado-bd-traer').onclick = function () {
+        return U.mientrasGuarda($('alumnado-bd-traer'), async function () {
+          if (!(await carpeta())) { U.aviso('Primero señala la carpeta en Ajustes › El centro › Carpeta de la base de datos de alumnado.', 'ambar'); return; }
+          await traer(true, true);
+          pintarCopia();
+        });
+      };
+    }
+    var p = $('alumnado-bd-carpeta');
+    if (p) {
+      var dir = await carpeta();
+      p.textContent = dir ? 'Carpeta señalada: ' + dir.name + '.' : 'Sin carpeta señalada en este ordenador: se usa la copia de la nube.';
+      var olv = $('alumnado-bd-olvidar');
+      if (olv) olv.classList.toggle('oculto', !dir);
+      /* Fila 319: con la carpeta a la vista y con permiso, si no tiene el fichero se avisa (sin permiso no se mira ni se pide). */
+      var av = $('alumnado-bd-aviso'), bloqueBD = $('bloque-alumnado-bd');
+      if (av) {
+        var textoAviso = '';
+        if (dir && bloqueBD && bloqueBD.offsetParent && await permiso(dir, false)) {
+          try { await dir.getFileHandle(FICHERO); } catch (e) { textoAviso = 'En esta carpeta no está ' + FICHERO + '. Señala la que lo tiene.'; }
+        }
+        av.textContent = textoAviso;
+        av.classList.toggle('oculto', !textoAviso);
+      }
+    }
+    await pintarCopia();
+  }
+
+  async function pintarCopia() {
+    if (window.DatosQueTengoVer) DatosQueTengoVer.repintar();   /* fila 319: la tabla de Herramientas */
+    var ps = document.querySelectorAll('.alumnado-bd-copia');
+    if (!ps.length) return;
+    var d = await leer();
+    var texto = 'Todavía no hay ninguna copia: el alumnado sale solo de RegAlum.csv.';
+    if (d) {
+      texto = 'Lo que tengo ahora: ' + d.alumnos.length + ' alumnos y ' + d.campos.length + ' datos, del ' + fechaLegible(d.generado) + '.';
+      if (window.DatosQueTengo) {
+        try {
+          var fila = (await DatosQueTengo.estado()).filter(function (f) { return f.id === 'alumnado-bd'; })[0];
+          if (fila && fila.hay) texto = 'Lo que tengo ahora: ' + fila.cuantos + ', del ' + DatosQueTengo.fechaHora(fila.fecha) + '.' + (fila.via ? ' ' + DatosQueTengo.viaCorta(fila) : '');
+        } catch (e) { /* se queda con la frase de antes */ }
+      }
+    }
+    Array.prototype.forEach.call(ps, function (x) { x.textContent = texto; });
+  }
+
+  if (window.Gestor && Gestor.alRefrescar) Gestor.alRefrescar.push(alEntrar);
+
+  return {
+    FICHERO: FICHERO, ACUERDO: ACUERDO, CLAVE_CARPETA: CLAVE_CARPETA, validar: validar,
+    leer: leer, enMemoria: enMemoria, olvidar: olvidar, guardar: guardar, carpeta: carpeta, permiso: permiso, mirarCarpeta: mirarCarpeta, traer: traer, aceptar: aceptar,
+    hechoPor: hechoPor, unir: unir, porClave: porClave, fechaGenerado: fechaGenerado, fechaLegible: fechaLegible,
+    pintarAjustes: pintarAjustes
+  };
+})();
+window.AlumnadoBD = AlumnadoBD;

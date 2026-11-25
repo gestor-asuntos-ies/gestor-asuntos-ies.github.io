@@ -1,0 +1,453 @@
+/* ============================================================
+   documentos-sueltos.js — lo que llega y lo que se archiva.
+
+   Un fichero suelto en la carpeta de asuntos abiertos es trabajo que
+   todavía no tiene carpeta: casi siempre, algo que ha dejado ahí el
+   equipo directivo. Se enseñan arriba del todo, y los que llegan con
+   la aplicación abierta se marcan como nuevos.
+
+   Aquí están también la vigilancia que mira cada poco si ha llegado
+   alguno, y el archivado y la reapertura de asuntos.
+   ============================================================ */
+
+/* El marcador con el que se abre un suelto en el visor (17-sep-2026,
+   fila 25): así se sabe, sin ambigüedad, cuál de la lista es. */
+function marcadorDeSuelto(nombre) { return 'suelto:' + nombre; }
+
+/* Si el documento que se está viendo ha dejado de estar en "Por
+   clasificar" (se ha creado un asunto con él, se ha metido en uno que
+   ya existía, o se ha borrado), el visor se cierra solo: no tiene
+   sentido seguir viendo ni sus botones ni su documento. */
+function cerrarVisorSiYaNoEsSuelto() {
+  if (!window.Visor) return;
+  var m = Visor.marcadorAbierto();
+  if (!m || m.indexOf('suelto:') !== 0) return;
+  var nombre = m.slice('suelto:'.length);
+  if (!App.E.sueltos.some(function (s) { return s.nombre === nombre; })) Visor.cerrar();
+}
+
+/* La fecha de un documento suelto es la de su fichero en disco
+   (fila 191, docs/INICIO-CUATRO-BLOQUES.md): la usan tanto el pie de su
+   tarjeta aquí como el bloque "Ha llegado" de js/inicio.js. */
+App.fechaDeSuelto = async function (s) {
+  try {
+    var f = await s.handle.getFile();
+    var d = new Date(f.lastModified);
+    return isNaN(d.getTime()) ? null : d;
+  } catch (e) { return null; }
+};
+
+/* El último repintado gana (fila 101): la lista se monta aparte y se
+   cambia de una vez al final, y una pasada vieja que termina tarde no
+   pinta nada (antes salían tarjetas repetidas). */
+App.turnoSueltos = 0;
+
+App.pintarSueltos = async function () {
+  var turno = ++App.turnoSueltos;
+  cerrarVisorSiYaNoEsSuelto();
+  var q = U.normalizar($('buscar-abiertos').value);
+  var lista = App.E.sueltos.filter(function (s) {
+    return !q || U.normalizar(s.nombre).indexOf(q) !== -1;
+  });
+
+  var cuantosNuevos = Object.keys(App.E.reciales).length;
+  $('btn-sueltos-visto').classList.toggle('oculto', !cuantosNuevos);
+  var rotulo = $('nuevos-sueltos');
+  rotulo.textContent = cuantosNuevos === 1 ? '1 nuevo' : cuantosNuevos + ' nuevos';
+  rotulo.classList.toggle('oculto', !cuantosNuevos);
+
+  /* Saber la fecha de cada documento obliga a abrirlo, así que solo se
+     hace cuando esta lista está a la vista. */
+  if (App.E.vista !== 'clasificar') return;
+
+  var caja = $('lista-sueltos');
+  if (!lista.length) {
+    caja.innerHTML = '';
+    caja.innerHTML = '<div class="vacio">' + (App.E.entradaNoEsta
+      ? Entrada.FRASE_NO_ESTA
+      : App.E.sueltos.length
+      ? 'Ningún documento coincide con lo que buscas.'
+      : 'No hay documentos sueltos. Todo lo que ha llegado está ya dentro de su asunto.') +
+      '</div>';
+    return;
+  }
+
+  var conFecha = lista.length <= 40;
+  var nueva = document.createDocumentFragment();
+  for (var i = 0; i < lista.length; i++) {
+    var s = lista[i];
+    var pie = '';
+    if (conFecha) {
+      var d = await App.fechaDeSuelto(s);
+      pie = d ? 'Puesto ahí el ' + d.toLocaleDateString('es-ES') + ' a las ' +
+              String(d.getHours()).padStart(2, '0') + ':' +
+              String(d.getMinutes()).padStart(2, '0') : '';
+      if (turno !== App.turnoSueltos) return;
+    }
+    nueva.appendChild(App.tarjetaSuelto(s, pie, !!App.E.reciales[s.nombre]));
+  }
+  if (turno !== App.turnoSueltos) return;
+  caja.innerHTML = '';
+  caja.appendChild(nueva);
+};
+
+/* `compacta` (opcional, fila 209, docs/INICIO-EN-PESTANAS.md): la fila
+   corta de "Ha llegado" en Inicio (js/inicio.js). El reparto de
+   acciones a la vista ("Crear asunto con él"/"Guardar en un asunto")
+   frente a las del menú ⋮ (Abrir, Separar, Unir, Sacar páginas,
+   Ajustar tamaño) ya es el que pide el boceto compacto: solo cambia,
+   en ese modo, el texto de "Crear asunto con él" (más corto). El modo
+   normal ("Ver todo"/zona-clasificar) sigue llamando sin este 4º
+   parámetro, con su texto de siempre. */
+App.tarjetaSuelto = function (s, pie, esNuevo, compacta) {
+  var div = document.createElement('div');
+  var abierta = window.Visor && Visor.marcadorAbierto() === marcadorDeSuelto(s.nombre);
+  div.className = 'tarjeta tarjeta-suelto' + (esNuevo ? ' tarjeta-nueva' : '') +
+                   (abierta ? ' tarjeta-abierta' : '');
+  div.dataset.suelto = s.nombre;
+  div.setAttribute('data-ayuda-clave', 'pulsa-para-verlo-al-lado-del');
+  div.onclick = function (ev) {
+    if (ev.target.closest('button, a, input, select, textarea, label, .acciones')) return;
+    App.abrirSuelto(s);
+  };
+  var ext = Nombres.extensionDe(s.nombre);
+  div.innerHTML = App.ICONO_DOCUMENTO +
+    '<div class="tarjeta-texto">' +
+      '<div class="tarjeta-nombre">' +
+        (esNuevo ? '<span class="marca-nueva">NUEVO</span>' : '') +
+        (ext ? '<span class="marca-ext">' + U.escapar(ext.toUpperCase()) + '</span>' : '') +
+        U.escapar(s.nombre) +
+      '</div>' +
+      '<div class="tarjeta-pie">' + U.escapar(pie) + '</div>' +
+    '</div>';
+
+  var acciones = document.createElement('div');
+  acciones.className = 'acciones';
+
+  /* A la vista, las dos que se usan de verdad al mirar la lista; el
+     resto (Abrir, Separar, Unir, Sacar páginas, y Borrar, que lo añade
+     js/papelera.js por envoltura) va detrás del menú de tres puntos,
+     para que el nombre nunca se estruje (17-sep-2026, fila 36,
+     docs/FILAS-QUE-NO-SE-ESTRUJAN.md). */
+  var enMenu = [];
+
+  var ver = document.createElement('button');
+  ver.className = 'boton';
+  ver.textContent = 'Abrir';
+  ver.setAttribute('data-ayuda-clave', 'lo-abre-en-otra-pestana-para');
+  ver.onclick = function () { App.abrirSuelto(s); };
+  enMenu.push(ver);
+
+  var crear = document.createElement('button');
+  crear.className = 'boton boton-principal';
+  crear.dataset.accionSuelto = 'crear';
+  crear.textContent = compacta ? 'Crear asunto' : 'Crear asunto con él';
+  crear.onclick = function () { App.empezarAsuntoCon(s); };
+  acciones.appendChild(crear);
+
+  /* Muchas veces el documento es de un asunto que ya existe. Este botón
+     lo lleva allí sin crear nada. */
+  var meter = document.createElement('button');
+  meter.className = 'boton';
+  meter.textContent = 'Guardar en un asunto';
+  meter.setAttribute('data-ayuda-clave', 'lo-lleva-a-la-carpeta-de');
+  /* Apagado mientras dura todo (fila 100: se podía pulsar dos veces). */
+  meter.onclick = async function () {
+    if (meter.disabled) return;
+    meter.disabled = true;
+    try { await App.meterSueltoEnAsunto(s); }
+    catch (e) { U.fallo('No he podido guardarlo en el asunto', e); }
+    finally { meter.disabled = false; }
+  };
+  acciones.appendChild(meter);
+
+  /* Separar, Unir y Sacar páginas (17-sep-2026, fila 22,
+     docs/SEPARAR-Y-UNIR-PDF.md): solo para PDF, también aquí, para el
+     escaneo de golpe que trae papeles de varios asuntos a la vez. */
+  if (window.PdfSepararUnir && window.PdfHerramientas && PdfHerramientas.esPdf(s.nombre, '')) {
+    function botonPdfSuelto(texto, ayuda, accion) {
+      var boton = document.createElement('button');
+      boton.className = 'boton';
+      boton.title = ayuda;
+      boton.textContent = texto;
+      boton.onclick = function () {
+        accion({
+          modo: 'suelto', dir: ((window.Entrada && Entrada.dir()) || App.E.abiertos), nombre: s.nombre, handle: s.handle,
+          alTerminar: function () { App.pintarSueltos(); }
+        });
+      };
+      return boton;
+    }
+    enMenu.push(botonPdfSuelto('Separar', 'Partirlo en varios documentos', PdfSepararUnir.separar));
+    enMenu.push(botonPdfSuelto('Unir', 'Juntarlo con otro PDF de Por clasificar', PdfSepararUnir.unir));
+    enMenu.push(botonPdfSuelto('Sacar páginas', 'Sacar una copia con solo algunas páginas', PdfSepararUnir.sacarPaginas));
+    /* Fila 57, 18-sep-2026, docs/HUECO-PARA-SELLO-Y-FIRMA.md. Texto del
+       botón "Ajustar tamaño" desde la fila 58 (docs/AJUSTES-DE-USO-2026-
+       09-18.md, 2); el fichero y la función se quedan igual. */
+    if (window.PrepararDocumento) {
+      enMenu.push(botonPdfSuelto('Ajustar tamaño',
+        'Deja hueco arriba para el sello de Séneca y abajo para la firma', PrepararDocumento.abrir));
+    }
+  }
+
+  /* Siempre hay al menos "Abrir": el menú existe siempre, así
+     js/papelera.js siempre encuentra dónde meter "Borrar" al final. */
+  acciones.appendChild(U.menuDeAcciones(enMenu));
+
+  div.appendChild(acciones);
+  return div;
+};
+
+/* ---------- meter un documento suelto en un asunto que ya existe ----------
+
+   El cuadro de elegir asunto es el mismo de la bandeja de correos, y
+   vive en js/elegir-asunto.js. Lo único propio de aquí es la
+   puntuación de "Podrían encajar": de un documento suelto solo se sabe
+   el nombre del fichero.
+
+     +10  por cada palabra de cuatro letras o más del nombre del
+          fichero (sin extensión, sin la fecha AAMMDD de delante y sin
+          el código de registro) que aparezca en el nombre del asunto.
+     +40  el nombre del tercero del asunto (apellidos y nombre, en
+          cualquier orden) aparece en el nombre del fichero.
+     +15  el asunto está abierto.
+     +10  el asunto se creó o se movió en los últimos 30 días.
+     +50  (fila 88, 21-sep-2026) el lector ya ha reconocido el tercero
+          del documento, y es el mismo que el del asunto.
+     +10  (fila 88) el lector ya ha reconocido el tipo, y es el mismo
+          que el del asunto.
+
+   Se enseñan los que pasen de 40 puntos, como mucho cinco. */
+
+App.palabrasDelSuelto = function (nombre) {
+  var limpio = String(nombre || '')
+    .replace(/\.[A-Za-z0-9]{1,8}$/, ' ')            /* la extensión */
+    .replace(/^\d{6}(?=\D|$)/, ' ')                 /* la fecha AAMMDD de delante */
+    .replace(/\d{2}[ESes][MAma]\d{4}/g, ' ');       /* el código de registro */
+  return U.normalizar(limpio)
+    .split(/[^a-z0-9ñ]+/)
+    .filter(function (p) { return p.length >= 4; });
+};
+
+/* Fila 88, 21-sep-2026, docs/POR-CLASIFICAR-ASUNTO-EXISTENTE.md, punto
+   8: si js/documentos-sueltos-lector.js ya tiene un resultado en caché
+   para este fichero (la pantalla de "Por clasificar" lo lee siempre
+   que puede), se suma a la puntuación de siempre, sin quitar nada:
+   +50 si el tercero leído es el del asunto, +10 si el tipo leído es
+   el del asunto. Así, en "Guardar en un asunto", los asuntos del
+   tercero leído salen arriba en "Podrían encajar". Sin lector
+   cargado, o sin resultado todavía (o sin nada que proponer), la
+   puntuación es la de siempre. */
+App.parecidoDelSuelto = function (nombre) {
+  var E = window.ElegirAsunto;
+  var palabras = App.palabrasDelSuelto(nombre);
+  var texto = U.normalizar(nombre);
+  var leido = window.LectorDeSueltos && window.LectorDeSueltos.resultadoDe(nombre);
+  var S = window.SugerenciasAsuntoExistente;
+  return E.mejores(E.todos().map(function (x) {
+    var puntos = E.puntosPorPalabras(palabras, x.nombre);
+    if (E.terceroDentroDe(x.ficha, texto)) puntos += 40;
+    puntos += E.puntosDeBase(x.nombre, x.ficha);
+    if (leido) {
+      if (leido.tercero && x.ficha.categoria === leido.tercero.categoria && S &&
+          S.esDelMismoTercero(leido.tercero, x.ficha.tercero)) puntos += 50;
+      if (leido.tipo && x.ficha.tipo === leido.tipo.tipo) puntos += 10;
+    }
+    return { nombre: x.nombre, ficha: x.ficha, puntos: puntos };
+  }));
+};
+
+App.meterSueltoEnAsunto = async function (s) {
+  var E = window.ElegirAsunto;
+
+  var sugeridos = [];
+  try { sugeridos = App.parecidoDelSuelto(s.nombre); } catch (e) { sugeridos = []; }
+
+  var elegido = await E.elegir({
+    titulo: 'Guardar el documento en un asunto',
+    cabecera: '<p class="explica">' + U.escapar(s.nombre) +
+              '<br><span class="suave">Elige el asunto. Después le pones nombre y dices de qué tarea es.</span></p>',   /* fila 661 */
+    sugeridos: sugeridos,
+    crearNuevo: { texto: 'No está: crear un asunto nuevo con él',
+                  alPulsar: function () { App.empezarAsuntoCon(s); } }
+  });
+  if (!elegido) return;
+  await App.meterSueltoEnAsuntoElegido(s, elegido);
+};
+
+/* El traslado propiamente dicho, una vez que ya se sabe a qué asunto
+   ({nombre, ficha}): si está archivado, pregunta si reabrir antes de
+   meterlo (App.llevarSueltoA, más abajo). Es lo que hace
+   App.meterSueltoEnAsunto tras "Guardar en un asunto", pero se saca
+   aparte (21-sep-2026, fila 88, docs/POR-CLASIFICAR-ASUNTO-
+   EXISTENTE.md) porque "Guardar aquí", el botón de la sugerencia que
+   pinta js/documentos-sueltos-sugerencias.js, ya sabe a qué asunto va
+   sin pasar por el cuadro de elegir: necesita el mismo camino, sin
+   repetirlo. */
+/* `opciones` (fila 103, docs/EL-HITO-MESA-DE-TRABAJO.md, sección 1,
+   camino "Desde 'Por clasificar'"): opcional, con `{ hito }`. Viaja
+   tal cual hasta App.verDocumentos, para que al ponerle nombre al
+   documento ya movido quede apuntado al hito. */
+App.meterSueltoEnAsuntoElegido = async function (s, elegido, opciones) {
+  var E = window.ElegirAsunto;
+
+  if (!E.estaArchivado(elegido.ficha)) {
+    await App.llevarSueltoA(s, elegido.nombre, elegido.ficha, opciones);
+    return;
+  }
+
+  var que = await E.preguntarSiReabrir(elegido, {
+    explica: '<p>Si el documento es de una gestión que vuelve a moverse, lo normal es ' +
+             'reabrir el asunto. Si solo es papeleo que llega tarde, no hace falta.</p>',
+    reabrir: 'Reabrir y guardarlo aquí',
+    sinReabrir: 'Guardarlo sin reabrir'
+  });
+  if (que === 'reabrir') {
+    var ficha = elegido.ficha || {};
+    var dentro;
+    try {
+      dentro = await Carpetas.bajar(App.E.archivo, [ficha.categoria, ficha.tercero], false);
+    } catch (e) {
+      U.aviso('No encuentro la carpeta de ese asunto en el ARCHIVO: ' + U.mensajeDeError(e), 'malo');
+      return;
+    }
+    var pedido = { nombre: elegido.nombre, padre: dentro, ficha: ficha };
+    await App.reabrirAsunto(pedido);
+    /* Si no se ha llegado a reabrir (se canceló, o falló el traslado de
+       la carpeta), el documento no se toca. Fila 648: al reabrir, la carpeta puede cambiar de
+       nombre (recupera a su persona); `pedido.nombre` ya trae el de ahora. */
+    if (!(await Carpetas.existe(App.E.abiertos, pedido.nombre))) return;
+    elegido.nombre = pedido.nombre;
+    await App.llevarSueltoA(s, elegido.nombre, {}, opciones);
+  } else if (que === 'guardar') {
+    await App.llevarSueltoA(s, elegido.nombre, elegido.ficha, opciones);
+  }
+};
+
+/* El traslado propiamente dicho (fila 661, docs/661-BANDEJA-CON-HITO-Y-TAREA.md): ya no se mueve al elegir el asunto. Se abre el cuadro
+   del nombre con el fichero todavía en «Por clasificar», y el documento entra en el asunto, con su nombre y colgado de su tarea, al
+   pulsar «Guardar» (js/bandeja-a-asunto.js). «Volver», «Cerrar» y la ✕ no guardan nada. */
+App.llevarSueltoA = function (s, nombreAsunto, ficha, opciones) {
+  return window.BandejaAAsunto.suelto(s, nombreAsunto, ficha, opciones);
+};
+
+App.abrirSuelto = async function (s) {
+  try {
+    var f = await s.handle.getFile();
+    var url = URL.createObjectURL(f);
+    window.open(url, '_blank');
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) {
+    U.aviso('No he podido abrir el documento: ' + U.mensajeDeError(e), 'malo');
+  }
+};
+
+/* "dd/mm/aaaa" (lo que da LectorDocumentos.analizar) -> ISO, para
+   "Fecha de inicio". Cadena vacía si no se entiende (fila 173,
+   docs/NUEVO-ASUNTO-SIN-REPETIR.md: cada fichero que lo necesita tiene
+   su propia copia mínima, en vez de forzar una sola en js/util.js). */
+function isoDeFechaLector(ddmmaaaa) {
+  var p = String(ddmmaaaa || '').split('/');
+  return p.length === 3 ? p[2] + '-' + p[1] + '-' + p[0] : '';
+}
+
+/* "Crear asunto con él" usa lo que ya se ha leído del documento (fila
+   174, docs/POR-CLASIFICAR-USA-LO-LEIDO.md, punto 4): con tipo y
+   tercero claros, crea de un tirón (como hacía «Aceptar»); con tercero
+   y sin tipo, deja el tercero esperando en Nuevo asunto
+   (App.nuevoAsuntoCon, fila 173); sin nada, o sin haber terminado de
+   leer, como siempre. En los tres casos, la fecha leída va a "Fecha de
+   inicio". El título y la clase del botón los pone
+   js/documentos-sueltos-lector.js en cuanto termina de leer. */
+App.empezarAsuntoCon = function (s) {
+  var propuesta = window.LectorDeSueltos ? LectorDeSueltos.resultadoDe(s.nombre) : undefined;
+  var tipoObj = propuesta && propuesta.tipo &&
+    (App.E.tipos || []).filter(function (t) { return t.tipo === propuesta.tipo.tipo; })[0];
+  var fecha = propuesta && propuesta.fecha ? isoDeFechaLector(propuesta.fecha) : '';
+
+  if (tipoObj && propuesta.tercero && App.tipoEncajaConTercero(tipoObj, propuesta.tercero.persona)) {   /* fila 385 */
+    App.crearAsuntoConPropuesta(tipoObj, propuesta.tercero.persona, s);
+    return;
+  }
+  App.E.pendiente = s;
+  delete App.E.reciales[s.nombre];
+  App.actualizarTitulo();
+  App.nuevoAsuntoCon(propuesta && propuesta.tercero
+    ? { tercero: propuesta.tercero.persona, fecha: fecha || null }
+    : { fecha: fecha || null });
+};
+
+App.pintarPendiente = function () {
+  var caja = $('aviso-pendiente');
+  if (window.EncargosLlegada && EncargosLlegada.avisoDeNuevo(caja)) return;   /* fila 289: viene de un encargo */
+  if (!App.E.pendiente) { caja.classList.add('oculto'); caja.innerHTML = ''; return; }
+  caja.classList.remove('oculto');
+  caja.innerHTML = '<strong>Este asunto se crea con un documento.</strong>' +
+    '<p>' + U.escapar(App.E.pendiente.nombre) + ' se guardará dentro de la carpeta nueva. ' +
+    'Después se abrirá el cuadro para ponerle el nombre.</p>';
+  var b = document.createElement('button');
+  b.className = 'boton';
+  b.textContent = 'Dejarlo donde está';
+  b.onclick = function () { App.E.pendiente = null; App.pintarPendiente(); };
+  caja.appendChild(b);
+};
+
+$('btn-sueltos-visto').onclick = function () {
+  App.E.reciales = {};
+  App.actualizarTitulo();
+  App.pintarSueltos();
+};
+
+/* Mirar cada poco si ha llegado algo: js/documentos-vigilancia.js
+   (fila 191: sacado de aquí, corta-y-pega literal, para que este
+   fichero no pase de 600 líneas). */
+
+/* ---------- las acciones, también dentro del panel del visor ----------
+
+   (17-sep-2026, fila 25). Mismos botones que la tarjeta, tal cual: se
+   construye la tarjeta entera (que ya trae "Borrar", puesto por
+   js/papelera.js envolviendo App.tarjetaSuelto) y se saca su bloque de
+   acciones, quitando "Abrir" porque ahí ya se está viendo. Así no hay
+   una segunda copia de la lógica de los botones. */
+App.accionesDeSuelto = function (s) {
+  var tarjeta = App.tarjetaSuelto(s, '', false);
+  var acciones = tarjeta.querySelector('.acciones');
+  if (!acciones) return null;
+  /* "Abrir" vive ahora dentro del menú de tres puntos (fila 36), no
+     suelto entre los hijos directos: se busca en cualquier profundidad
+     y se quita de donde esté. */
+  var abrir = Array.prototype.filter.call(acciones.querySelectorAll('button'), function (b) {
+    return (b.textContent || '').trim() === 'Abrir';
+  })[0];
+  if (abrir && abrir.parentNode) abrir.parentNode.removeChild(abrir);
+  return acciones;
+};
+
+/* ---------- marcar en la lista el documento que se está viendo ----------
+
+   (17-sep-2026, fila 25). js/visor.js no sabe nada de esta lista: solo
+   avisa de qué marcador está abierto (o ninguno) cada vez que cambia.
+   Aquí se traduce eso a la tarjeta de verdad. */
+(function () {
+  function marcar(marcador) {
+    var caja = $('lista-sueltos');
+    if (!caja) return;
+    Array.prototype.forEach.call(caja.querySelectorAll('.tarjeta-abierta'), function (el) {
+      el.classList.remove('tarjeta-abierta');
+    });
+    if (!marcador || marcador.indexOf('suelto:') !== 0) return;
+    var nombre = marcador.slice('suelto:'.length);
+    var fila = Array.prototype.filter.call(caja.querySelectorAll('.tarjeta-suelto'), function (el) {
+      return el.dataset.suelto === nombre;
+    })[0];
+    if (!fila) return;
+    fila.classList.add('tarjeta-abierta');
+    fila.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function enganchar() {
+    if (!window.Visor) return;
+    Visor.alCambiar(marcar);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar);
+  else enganchar();
+})();

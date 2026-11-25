@@ -1,0 +1,331 @@
+/* ============================================================
+   asuntos-nuevo-crear.js — Nuevo asunto: el nombre de la carpeta, la vista previa y crear el asunto.
+
+   Sacado tal cual de js/asuntos-nuevo.js en la fila 133
+   (docs/PARTIR-FICHEROS-GRANDES.md), sin cambiar nada de lo que hace.
+   Se carga justo detrás de él.
+   ============================================================ */
+
+$('campo-fecha').oninput = function () {
+  App.actualizarCursoNuevo();
+  App.actualizarLimiteNuevo();
+  App.actualizarFechaLoPideNuevo();
+  App.refrescarVista();
+};
+['campo-curso', 'campo-descripcion'].forEach(function (id) {
+  $(id).oninput = function () { App.refrescarVista(); };
+});
+
+/* El nombre de la carpeta lleva el nombre corto del tipo si lo tiene
+   (20-sep-2026, fila 79, apartado 4.9): `d.tipo` no se toca, porque
+   también alimenta `datosNuevoAsunto.tipo`, que tiene que quedarse
+   con el nombre de siempre (lo buscan por él la guía del tipo, las
+   cuentas de asuntos con ese tipo...). Solo el nombre que se monta
+   pasa por Nombres.tipoParaCarpeta. */
+function nombreDeCarpetaPropuesto(d) { return nombreDeCarpetaAjustado(d).nombre; }
+
+/* { nombre, recortado } (fila 130: la carpeta no pasa de 150 caracteres). */
+function nombreDeCarpetaAjustado(d) {
+  var tipo = App.E.tipos.filter(function (t) { return t.tipo === d.tipo; })[0];
+  /* Fila 239 (docs/NOMBRES-FIJOS-CON-NUMERO.md): un asunto nuevo lleva
+     siempre su número (`AAMMDD A26-0137 TIPO Tercero`, sin recortar).
+     Mientras el número no se ha calculado, no hay nombre. */
+  if (!App.E.nuevo.numero) return { nombre: '', recortado: false, noCabe: false, sinNumero: true };
+  var copia = Object.assign({}, d, {
+    tipo: tipo ? Nombres.tipoParaCarpeta(tipo) : d.tipo,
+    numero: App.E.nuevo.numero, categoria: App.E.nuevo.categoria
+  });
+  return Nombres.montarAsunto(copia);
+}
+
+/* El siguiente número de asunto, SIN gastarlo, para enseñar el nombre
+   exacto en la vista previa. Se pide una vez por formulario y, al
+   llegar, se repinta la vista. */
+App.pedirNumeroNuevo = function () {
+  var formulario = App.E.nuevo;
+  if (formulario.numero || formulario.pidiendoNumero) return;
+  formulario.pidiendoNumero = true;
+  Numeros.proximo('asuntos').then(function (n) {
+    formulario.numero = n;
+  }, function (e) {
+    formulario.fallaNumero = U.mensajeDeError(e);
+  }).then(function () {
+    formulario.pidiendoNumero = false;
+    if (App.E.nuevo === formulario) App.refrescarVista();
+  });
+};
+
+App.datosDelFormulario = function () {
+  var camposParaNombre = [];   /* fila 251: los campos no entran en ningún nombre */
+  var loPide = App.loPideNuevoControles ? App.loPideNuevoControles.leer() : null;
+  var d = {
+    fecha: $('campo-fecha').value,
+    tipo: App.E.nuevo.tipo || '',
+    curso: $('campo-curso').value.trim(),
+    grupo: '',   /* fila 251: el grupo ya no se ofrece para el nombre */
+    campos: camposParaNombre,
+    descripcion: $('campo-descripcion').value.trim(),
+    tercero: App.E.nuevo.tercero ? App.textoTercero(App.E.nuevo.tercero) : ''
+  };
+  /* Solo se añade la clave si hay nombre: dejarlo todo en blanco es
+     válido, y entonces el asunto nace sin `loPide` (docs/LO-PIDE.md, 3). */
+  if (loPide && loPide.nombre) d.loPide = loPide;
+  return d;
+};
+
+App.refrescarVista = function () {
+  if (window.ActividadesFormulario) ActividadesFormulario.alRefrescarNuevo();   /* fila 306: el botón «Apuntar la actividad» */
+  /* Fila 215 (docs/NUEVO-ASUNTO-CATEGORIA-GUIA.md): "Crear el asunto"
+     está siempre a la vista, así que bloque-detalles ya no se esconde
+     mientras falte persona o tipo (antes, fila 197): se deja siempre
+     visible, aquí, cada vez que se repinta. */
+  $('bloque-detalles').classList.remove('oculto');
+  if (!App.E.nuevo.tipo || !App.E.nuevo.tercero) {
+    $('vista-nombre').textContent = '';
+    $('vista-ruta').textContent = '';
+    $('vista-ruta').classList.add('oculto');
+    $('btn-crear').disabled = true;
+    /* Fila 215: el botón está siempre a la vista; en gris, dice qué falta. */
+    $('btn-crear').textContent = !App.E.nuevo.tercero && !App.E.nuevo.tipo
+      ? 'Falta elegir la persona y el tipo de asunto'
+      : (!App.E.nuevo.tercero ? 'Falta elegir la persona' : 'Falta elegir el tipo de asunto');
+    return;
+  }
+  $('btn-crear').textContent = 'Crear el asunto';
+  var d = App.datosDelFormulario();
+  if (!App.E.nuevo.numero) {
+    $('vista-nombre').textContent = App.E.nuevo.fallaNumero ? '' : 'Calculando el número del asunto…';
+    $('vista-ruta').textContent = App.E.nuevo.fallaNumero
+      ? 'No he podido calcular el número del asunto: ' + App.E.nuevo.fallaNumero : '';
+    $('vista-ruta').classList.toggle('oculto', !App.E.nuevo.fallaNumero);   /* fila 629: «Se creará esta carpeta» ya no se enseña, pero este fallo sí se dice */
+    $('btn-crear').disabled = true;
+    Nombres.avisoRecorte($('vista-nombre'), false, false);
+    if (!App.E.nuevo.fallaNumero) App.pedirNumeroNuevo();
+    return;
+  }
+  var ajustado = nombreDeCarpetaAjustado(d);
+  var nombre = ajustado.nombre;
+  $('vista-nombre').textContent = nombre;
+  Nombres.avisoRecorte($('vista-nombre'), ajustado.recortado, ajustado.noCabe, 'nuevo');   /* filas 130, 177 y 263 */
+  $('vista-ruta').classList.add('oculto');
+  $('vista-ruta').textContent = 'En ' + App.E.abiertos.name +
+    '. Al cerrarlo irá a ' + App.E.archivo.name + ' / ' + App.E.nuevo.categoria + ' / ' + d.tercero;
+  /* Fila 263: una ruta larga avisa en ámbar, pero no impide crear. */
+  $('btn-crear').disabled = !nombre || nombre.length < 8;
+};
+
+/* Las rutas muy largas dan problemas en una carpeta sincronizada en la nube: se
+   avisa y se deja decidir, en vez de cortar el nombre a lo tonto. */
+App.LARGO_MAXIMO_NOMBRE = 180;
+
+/* «Crear», con el botón en «Guardando…» mientras dura (fila 100: se
+   podía pulsar dos veces). */
+$('btn-crear').onclick = function () {
+  return U.mientrasGuarda($('btn-crear'), App.crearAsuntoDelFormulario);
+};
+
+/* Fila 385 (docs/CREAR-DESDE-POR-CLASIFICAR-CON-TIPO.md): nunca se crea
+   un asunto sin tipo o sin tercero, lo llame quien lo llame. Sin error
+   y sin tocar la pantalla: su botón ya dice qué falta. */
+App.faltaTipoOTercero = function () {
+  return !App.E.nuevo.tipo || !App.E.nuevo.tercero;
+};
+
+/* ¿El tipo y la persona son de la misma categoría? Solo entonces se
+   crea de un clic (fila 385). `tipo` es el objeto del tipo. */
+App.tipoEncajaConTercero = function (tipo, tercero) {
+  return !!(tipo && tercero && Nombres.categoriasDe(tipo).indexOf(tercero.categoria) !== -1);
+};
+
+App.crearAsuntoDelFormulario = async function () {
+  if (App.faltaTipoOTercero()) return;
+  if (!App.validarCamposObligatorios()) return;
+  var d = App.datosDelFormulario();
+  /* Fila 239: por si se pulsa antes de que la vista previa haya calculado el número. */
+  if (!App.E.nuevo.numero) {
+    try { App.E.nuevo.numero = await Numeros.proximo('asuntos'); }
+    catch (eNum) { U.fallo('No he podido calcular el número del asunto', eNum); return; }
+  }
+  var ajustado = nombreDeCarpetaAjustado(d);
+  var nombre = ajustado.nombre;
+  if (!nombre) return;
+  if (nombre.length > App.LARGO_MAXIMO_NOMBRE) {
+    var seguir = await U.preguntar('El nombre es muy largo',
+      '<p>Este nombre tiene ' + nombre.length + ' caracteres:</p>' +
+      '<p class="nota">' + U.escapar(nombre) + '</p>' +
+      '<p>Las rutas muy largas dan problemas en una carpeta sincronizada en la nube.</p>', 'Crear igual');
+    if (!seguir) return;
+  }
+
+  /* Fila 239: el número se gasta ahora, releyendo el disco. Si el otro
+     ordenador se ha quedado el que enseñaba la vista previa, el asunto
+     se crea igual con el siguiente (fila 275) y se dice al final: nadie
+     elige el número, así que no hay nada que revisar. */
+  var avisoNumero = '';
+  try {
+    var pedido = App.E.nuevo.numero;
+    var reserva = await Numeros.reservar('asuntos', pedido);
+    if (reserva.cambio) {
+      App.E.nuevo.numero = reserva.numero;
+      nombre = nombreDeCarpetaAjustado(d).nombre;
+      avisoNumero = 'Asunto creado como ' + reserva.numero + '; el ' + pedido + ' lo acaba de usar otro ordenador.';
+    }
+  } catch (eRes) {
+    U.fallo('No he podido reservar el número del asunto', eRes);
+    return;
+  }
+
+  /* Lo principal: la carpeta y su ficha. Lo de después (meter el
+     documento traído, limpiar el formulario, la lista, el cuadro de
+     documentos) es accesorio: si falla, ámbar (fila 100). */
+  var carpeta, terceroCreado = null, primerHitoId = null;
+  try {
+    if (await Carpetas.existe(App.E.abiertos, nombre)) {
+      U.aviso('Ya hay un asunto abierto con ese mismo nombre.', 'malo');
+      return;
+    }
+    carpeta = await Carpetas.crear(App.E.abiertos, nombre);
+  } catch (e0) {
+    U.fallo('No he podido crear la carpeta', e0);
+    return;
+  }
+  try {
+
+    var camposParaGuardar = {};
+    App.valoresCamposActuales().forEach(function (v) {
+      camposParaGuardar[v.clave] = { valor: v.valor, enNombre: v.enNombre };
+    });
+
+    /* La vía sale de "Lo pide" (fila 173, punto 4): un solo cuadro, un
+       solo sitio donde se pregunta. leerVia() da {via, dato} pase lo
+       que pase, aunque no se haya elegido "quién lo pide". */
+    var via = App.loPideNuevoControles ? App.loPideNuevoControles.leerVia() : { via: '', dato: '' };
+    var datosNuevoAsunto = {
+      estado: 'abierto', tipo: d.tipo, categoria: App.E.nuevo.categoria,
+      tercero: d.tercero, curso: d.curso, grupo: d.grupo, descripcion: d.descripcion,
+      numero: App.E.nuevo.numero,   /* fila 239: nunca cambia */
+      campos: camposParaGuardar,
+      via: via.via,
+      viaDato: via.dato,
+      limite: $('campo-limite').value,
+      abiertoEl: U.ahora(), abiertoPor: App.E.usuario
+    };
+    if (d.loPide) datosNuevoAsunto.loPide = d.loPide;
+    if (App.E.nuevo.departamento) datosNuevoAsunto.departamento = App.E.nuevo.departamento;   /* fila 167 */
+    /* La foto del contacto (fila 66, docs/CONTACTO-GUARDADO-EN-LA-
+       FICHA.md): se guarda solo si el tercero se ha cogido del CSV
+       (App.E.nuevo.tercero), nunca para uno dado de alta a mano sin
+       ese paso. Sirve para el día en que ya no esté en el fichero. */
+    if (App.E.nuevo.tercero && !App.E.nuevo.tercero.esGrupo) {
+      datosNuevoAsunto.contacto = Datos.fotoDeContacto(App.E.nuevo.tercero, App.E.nuevo.categoria);
+    }
+    if (window.AsuntoDeGrupo) AsuntoDeGrupo.alDatosNuevos(datosNuevoAsunto, App.E.nuevo.tercero);   /* fila 293 */
+    await App.anotar(nombre, datosNuevoAsunto);
+    /* Fila 229: la primera línea del registro (accesorio). */
+    if (window.RegistroAsunto) await RegistroAsunto.auto({ nombre: nombre }, 'Asunto creado');
+    terceroCreado = App.E.nuevo.tercero;
+    /* Fila 197, punto 4: App.anotar ya ha creado los hitos de la guía
+       (envoltura de js/hitos.js), así que el primero ya existe aquí. */
+    try {
+      var hitosCreados = window.Hitos ? await Hitos.hitosDe(nombre) : [];
+      if (hitosCreados && hitosCreados.length) primerHitoId = hitosCreados[0].id;
+    } catch (e1b) { /* sin mesa que abrir; se sigue con la ficha */ }
+  } catch (e1) {
+    U.accesorio('La carpeta está creada, pero no he podido guardar su ficha. Ábrela y vuelve a ' +
+      'poner el estado', e1);
+    try { await App.verAbiertos(); } catch (e3) { /* solo pintar */ }
+    return;
+  }
+
+  try {
+    /* Si el asunto se ha empezado desde un documento suelto, ese
+       documento se mete ahora en la carpeta recién creada. Lo que se
+       haya leído de él (fila 174, punto 2) se guarda antes de moverlo,
+       para que viaje con él hasta el cuadro de ponerle nombre. */
+    var traido = App.E.pendiente;
+    var propuestaTraida = traido && window.LectorDeSueltos ? LectorDeSueltos.resultadoDe(traido.nombre) : null;
+    /* Lo que los módulos hacen al crear (fila 166), accesorio. */
+    var alCrear = (window.Gestor && Gestor.alCrearAsunto) || [], falloAlCrear = null;
+    for (var ac = 0; ac < alCrear.length; ac++) {
+      try { await alCrear[ac](nombre, datosNuevoAsunto, terceroCreado); }
+      catch (e4) { falloAlCrear = e4; }
+    }
+    if (traido) {
+      try {
+        await Carpetas.moverFichero(((window.Entrada && Entrada.dir()) || App.E.abiertos), traido.nombre, carpeta);
+      } catch (e2) {
+        U.accesorio('El asunto está creado, pero el documento no ha podido entrar', e2);
+        traido = null;
+      }
+      App.E.pendiente = null;
+      App.pintarPendiente();
+    }
+
+    U.aviso(avisoNumero || 'Asunto creado.', 'bueno');
+    if (falloAlCrear) U.accesorio('Asunto creado, pero no he podido guardar los datos del tercero', falloAlCrear);
+    U.copiar(nombre);
+    App.E.nuevo = App.nuevoEnBlanco();   /* fila 220: la misma forma en blanco que App.prepararNuevo */
+    $('campo-descripcion').value = '';
+    $('campo-limite').value = '';
+    App.limiteNuevoAuto = '';
+    App.loPideNuevoControles = null;
+    $('lopide-caja-nuevo').innerHTML = '';
+    $('campos-lista-nuevo').innerHTML = '';
+    App.pintarDatosFijosNuevo();   /* fila 629 */
+    /* Fila 215: bloque-detalles ya no se esconde entre un asunto y el
+       siguiente (el botón "Crear" tiene que seguir a la vista); lo
+       deja como corresponde el propio App.refrescarVista de más abajo. */
+    /* Fila 197: los dos bloques de arriba ya no se esconden entre un
+       asunto y el siguiente (persona y tipo están siempre a la vista),
+       así que aquí hay que dejarlos limpios a mano: sin ellos, el
+       tercero recién creado se seguiría viendo en la próxima visita. */
+    $('tercero-elegido').classList.add('oculto');
+    $('tercero-elegido').innerHTML = '';
+    App.pintarCategorias();
+    App.pintarTipos();
+    await App.verAbiertos();
+    /* Fila 197, punto 4: si el tipo tenía guía, directo a la mesa de su
+       primer hito; si no, la ficha, como hasta ahora (fila 119). */
+    var recien = App.E.listaAbiertos.filter(function (a) { return a.nombre === nombre; })[0];
+    if (primerHitoId && recien) {
+      if (window.HitosPanel) HitosPanel.desplegarAlAbrir(recien.nombre, primerHitoId);
+      if (window.FichaTarjetas) FichaTarjetas.abrirAlEntrar('trabajo');
+    }
+    if (!(recien && window.Navegacion && Navegacion.abrirAbierto(nombre))) App.ir('abiertos');
+
+    /* Con el documento ya dentro, se abre directo el cuadro de ponerle
+       el nombre que le toca (fila 174, punto 2; encima de la ficha
+       nueva), con lo que se haya leído del documento. */
+    if (traido && recien) await App.verDocumentos(recien, { ponerNombre: traido.nombre, propuesta: propuestaTraida });
+    if (window.EncargosLlegada && recien) await EncargosLlegada.alTerminarDeCrear(recien);   /* fila 289: los documentos de un encargo */
+  } catch (e) {
+    U.accesorio('Asunto creado, pero no he podido terminar de poner la pantalla al día. Pulsa Recargar', e);
+  }
+};
+
+/* Crea un asunto entero de un tirón, reutilizando tal cual el mismo
+   camino manual (categoría → tipo → tercero → "Crear"), con el
+   documento ya enganchado en App.E.pendiente: lo usa el botón
+   "Aceptar" de "Por clasificar" (js/documentos-sueltos-lector.js,
+   17-sep-2026, fila 41, docs/LEER-DOCUMENTOS-POR-CLASIFICAR.md) para
+   la propuesta que ha leído del documento. No se escribe ningún otro
+   camino: se llama a los mismos App.elegirCategoria/elegirTipo/
+   fijarTercero de siempre y se dispara el mismo botón "Crear", con su
+   aviso de duplicado (js/duplicados.js) funcionando exactamente igual. */
+App.crearAsuntoConPropuesta = async function (tipo, tercero, documentoSuelto) {
+  App.E.pendiente = documentoSuelto;
+  delete App.E.reciales[documentoSuelto.nombre];
+  App.actualizarTitulo();
+  /* Fila 385: si el tipo y la persona no son de la misma categoría, no se crea
+     nada: Nuevo asunto con la persona como sugerencia y sin tipo. */
+  if (!App.tipoEncajaConTercero(tipo, tercero)) {
+    App.nuevoAsuntoCon({ tercero: tercero });
+    return;
+  }
+  App.ir('nuevo');
+  App.elegirCategoria(tercero.categoria);
+  App.elegirTipo(tipo);
+  App.fijarTercero(tercero);
+  if (!App.E.nuevo.tipo) return;   /* fila 385: el tipo se descartó por el camino */
+  await $('btn-crear').onclick();
+};

@@ -1,0 +1,375 @@
+/* ============================================================
+   ficha-asunto.js — la pantalla de un asunto.
+
+   Al pulsar el nombre de un asunto se entra aquí. En una sola
+   pantalla está todo lo suyo: sus datos, el contacto del tercero, la
+   guía de su tipo con las casillas, sus notas, sus documentos y los
+   demás asuntos de ese mismo tercero. Y todos los botones de
+   siempre, sin volver a la lista.
+
+   Este fichero no guarda nada por su cuenta: para cambiar el estado,
+   la vía, el plazo, el nombre o el archivado llama a lo que ya hace
+   la aplicación. Así no hay dos sitios que hagan lo mismo.
+
+   Como aquí dentro está todo, la tarjeta de la lista se queda con el
+   desplegable del estado, "Copiar nombre" y "Archivar". Esa poda
+   también se hace aquí, un poco más abajo.
+   ============================================================ */
+(function () {
+
+  /* Fila 133 (docs/PARTIR-FICHEROS-GRANDES.md): este fichero se parte por
+     temas, sin cambiar nada de lo que hace. Aquí queda el núcleo (entrar
+     y salir, pintar la ficha y la barra de acciones); el resto vive en
+     js/ficha-huella.js (repintar solo si algo ha cambiado),
+     js/ficha-en-la-lista.js (la tarjeta de la lista abre la ficha),
+     js/ficha-consulta.js (no pisarse: presencia y modo consulta),
+     js/ficha-sellos.js (un papel que ya trae el sello) y
+     js/ficha-bloques.js (los bloques de dentro y "El encargo"). El estado
+     de la ficha y lo que se piden entre ellos va en `window.FichaNucleo`
+     (N), que solo usan estos seis ficheros. */
+  var N = window.FichaNucleo = {
+    actual: null,             /* el asunto que se está viendo */
+    modoActual: 'abierto',
+    ocupacionActual: null,    /* el compañero dentro (fila 24), o null */
+    huellaPintada: null,      /* ver js/ficha-huella.js */
+    ultimaListaFicheros: ''
+  };
+
+
+  /* Si el compañero ya está dentro de este asunto (17-sep-2026, fila
+     24): { usuario } mientras se está en modo consulta, o null si el
+     asunto está libre o el mando es de uno mismo. La vigilancia de
+     verdad —cuándo cambia, cada cuánto se relee— vive en
+     js/presencia.js; aquí solo se pinta lo que toca. */
+
+  function $(id) { return document.getElementById(id); }
+
+  /* La pantalla nueva entra en la lista de pantallas, para que al
+     pulsar cualquier pestaña se esconda como las demás. */
+  if (App.PANTALLAS.indexOf('asunto') === -1) App.PANTALLAS.push('asunto');
+
+  /* ==========================================================
+     ENTRAR Y SALIR
+     ========================================================== */
+
+  App.abrirFicha = function (a, modo) {
+    N.actual = a;
+    N.modoActual = modo || 'abierto';
+    N.ocupacionActual = null;
+    N.huellaPintada = null;      /* ficha nueva: nada que comparar todavía */
+    /* Cada ficha que se abre empieza su propia nota, aunque sea la
+       misma que ya estaba abierta (fila 37, 17-sep-2026): la caja de
+       escribir directa de js/notas.js solo sigue metiendo texto en la
+       MISMA nota mientras la ficha se repinta sola por debajo. */
+    if (window.Notas) window.Notas.olvidarBorrador();
+    /* Al entrar, siempre la pestaña «Trabajo» (fila 425). */
+    FichaTarjetas.alEntrar(a);
+    if (window.Navegacion) Navegacion.apuntar();   /* fila 119: de dónde se viene */
+    App.ir('asunto');
+    pintar();
+    if (window.HayQueRegistrarlo && N.modoActual === 'abierto' && !(window.SoloConsulta && SoloConsulta.activo())) {
+      HayQueRegistrarlo.migrar(a).catch(function () { /* se reintenta al abrir otra vez */ });   /* fila 670: las marcas antiguas pasan a tareas «Registrar» */
+    }
+    if (window.RutaCopia) RutaCopia.mirar();   /* fila 478: ¿ha llegado el registrado de Séneca encima de un documento? */
+
+    /* Solo se vigila la presencia en un asunto abierto: en el ARCHIVO
+       no hay nada que tramitar, así que nadie puede "pisarse". */
+    if (!window.Presencia) return;
+    if (N.modoActual !== 'abierto' || (window.SoloConsulta && SoloConsulta.activo())) { Presencia.dejarDeVigilar(); return; }   /* fila 260: en solo consulta no se escribe la presencia */
+    Presencia.vigilar(a.nombre, function (cambio) {
+      if (N.actual !== a) return;   /* se ha cambiado de ficha mientras tanto */
+      N.ocupacionActual = cambio.modo === 'consulta' ? { usuario: cambio.usuario } : null;
+      N.pintarPresencia();
+      N.aplicarModoConsulta();
+    });
+  };
+
+  /* Las marcas de arriba: el tipo y el número del asunto (fila 637: ya no sale «Lo pide»
+     ni el contacto; quién lo pide está en «Datos»). */
+  function marcasDeFicha(a, tipo) {
+    return (tipo ? '<span class="marca-tipo">' + U.escapar(tipo) + '</span>' : '') +
+      (a.ficha.numero ? '<span class="marca-numero" data-ayuda-clave="numero-del-asunto">' + U.escapar(a.ficha.numero) + '</span>' : '');   /* fila 239 */
+  }
+
+  /* El tercero, con su identificación, que es el título de la cabecera (fila 637); sin él, el nombre de la carpeta. */
+  function terceroDe(a) {
+    var f = a.ficha || {};
+    if (f.tercero) return f.tercero;
+    if (a.leido && a.leido.resto && window.Nombres) return Nombres.terceroDeResto(a.leido.resto) || a.nombre;
+    return a.nombre;
+  }
+
+  /* Tras cambiar el estado, el plazo, la vía o el encargo, se repinta
+     solo la barra de acciones (y las marcas), no la ficha entera, y se
+     pone al día la huella sin leer el disco: si no, el siguiente
+     vistazo a la carpeta vería la ficha "cambiada" y la rehacía de
+     golpe (fila 101, docs/REPINTAR-SOLO-LO-QUE-CAMBIA.md). `clave`
+     (opcional): solo si la ficha abierta es la de ese asunto. */
+  App.repintarAccionesFicha = function (clave) {
+    if (!fichaVisible()) return;
+    if (clave && N.actual.nombre !== clave) return;
+    var a = N.actual;
+    var fresca = App.E.registro && App.E.registro.asuntos && App.E.registro.asuntos[a.nombre];
+    if (fresca) a.ficha = fresca;
+    var marcas = document.querySelector('#ficha-asunto-cuerpo .ficha-marcas');
+    if (marcas) marcas.innerHTML = marcasDeFicha(a, tipoDe(a));
+    pintarAcciones(a, N.modoActual === 'abierto');
+    if (N.huellaPintada) N.huellaPintada.ficha = N.huellaFichaSin(a, N.ultimaListaFicheros);
+  };
+
+  function volverALaLista() {
+    N.actual = null;
+    if (window.Presencia) Presencia.dejarDeVigilar();
+    if (window.OtrosDelTercero) OtrosDelTercero.olvidarOrigen();
+    var defecto = N.modoActual === 'archivado' ? 'archivo' : 'abiertos';
+    if (window.Navegacion) Navegacion.volver(defecto); else App.ir(defecto);
+  }
+
+  /* Expuesta para js/ficha-nombre-acciones.js (18-sep-2026, fila 52):
+     "Editar el asunto" y "Borrar el asunto" viven ahora en el menú de
+     tres puntos del nombre, en su propio fichero, y necesitan volver a
+     la lista exactamente igual que hacían los botones de siempre. */
+  App.volverALaLista = volverALaLista;
+
+  /* Si la ficha se ve de verdad en pantalla (y no solo que `actual`
+     se ha quedado puesto porque no se pulsó "Volver" al cambiar de
+     pestaña). Un repintado AUTOMÁTICO —el que no ha pedido Francisco
+     pulsando un botón— consulta esto antes de tocar nada, y nunca
+     navega por su cuenta (fila 30, 17-sep-2026: guardar un documento
+     no debe echar de la ficha a la lista de asuntos). */
+  function fichaVisible() {
+    if (!N.actual) return false;
+    var pantalla = $('pantalla-asunto');
+    return !!pantalla && !pantalla.classList.contains('oculto');
+  }
+  App.fichaAbierta = function () { return fichaVisible() ? N.actual.nombre : ''; };
+  /* Fila 155: el asunto de la ficha a la vista (para guardar el PDF de un Word en su carpeta). */
+  App.asuntoDeLaFicha = function () { return fichaVisible() ? N.actual : null; };
+
+
+  /* ==========================================================
+     PINTAR LA FICHA
+     ========================================================== */
+
+  function tipoDe(a) {
+    return (a.leido && a.leido.tipo) || (a.ficha && a.ficha.tipo) || '';
+  }
+
+  /* `extra` (fila 101): la fila «Formularios» oculta que rellena
+     js/formularios.js; antes este segundo parámetro se ignoraba y la
+     fila no salía nunca. */
+  function filasHtml(buenas, extra) {
+    /* `id`: js/formularios.js (fila 82) rellena ahí su propia fila
+       "Formularios", async, y solo la enseña cuando de verdad hay
+       alguno: nace oculta (`extra`). */
+    return '<div class="ficha-datos" id="ficha-datos-tramite">' + buenas.map(function (f) {
+      /* Fila 245: un campo «solo aquí» lleva su marca y su «⋮»
+         (js/campo-desde-el-asunto.js). */
+      if (f.rotulo) return '<div class="ficha-dato ficha-dato-hito"><span class="ficha-rotulo-hito">' + U.escapar(f.rotulo) + '</span><span></span></div>';
+      if (f.elegir && window.FichaCamposListaVacia) return FichaCamposListaVacia.filaHtml(f);   /* fila 592 */
+      if (f.soloAqui) {
+        return '<div class="ficha-dato ficha-dato-aqui"><span>' + U.escapar(f.titulo) +
+          ' <span class="marca-solo-aqui">solo aquí</span></span><span>' +
+          (f.valor ? (f.ambar ? '<span class="ficha-valor-ambar" title="' + U.escapar(f.ayuda || '') + '">' + U.escapar(f.valor) + '</span>' : U.escapar(f.valor)) : '<span class="suave">sin valor</span>') +
+          ' <button type="button" class="campo-aqui-menu" data-clave="' + U.escapar(f.clave || '') +
+          '" data-nombre="' + U.escapar(f.titulo) + '" data-ayuda-clave="mas-opciones">⋮</button></span></div>';
+      }
+      /* Fila 637: «Quién lo pide» y «Por qué vía», con «Cambiar» (js/ficha-datos-bloque.js lo engancha) y «sin valor» si el tipo los pide. */
+      if (f.encargo || f.pide) {
+        return '<div class="ficha-dato ficha-dato-encargo"><span>' + U.escapar(f.titulo) + '</span><span>' +
+          (f.valor ? U.escapar(f.valor) : '<span class="suave">sin valor</span>') +
+          (f.encargo ? ' <button type="button" class="boton boton-chico encargo-cambiar" title="Cambiar quién lo pide y por qué vía">Cambiar</button>' : '') + '</span></div>';
+      }
+      return '<div class="ficha-dato' + (f.ambar ? ' ficha-dato-ambar' : '') + '"><span>' + U.escapar(f.titulo) + '</span>' +
+             '<span' + (f.ambar ? ' title="' + U.escapar(f.ayuda || '') + '"' : '') + '>' + U.escapar(f.valor) + '</span></div>';
+    }).join('') + (extra || '') + '</div>';
+  }
+
+  /* La línea gris bajo el nombre (18-sep-2026, fila 51,
+     docs/FICHA-DISPOSICION.md, 4): lo suelto que antes vivía en "Datos
+     del asunto" y no se repite en ningún otro sitio de la pantalla.
+     Lo que esté vacío no deja ni el separador ni un hueco. Se esconde
+     entera con la cabecera encogida (css/ficha-asunto.css). */
+  function subtituloDeFicha(a) {
+    var f = a.ficha || {};
+    var trozos = [
+      a.leido.fecha ? 'Abierto el ' + U.fechaLegible(a.leido.fecha) : '',
+      f.categoria || a.leido.categoria || '',
+      f.curso || a.leido.curso || '',
+      f.descripcion || '',
+      f.abiertoPor || ''
+    ].filter(Boolean);
+    if (!trozos.length) return '';
+    var linea = trozos.join(' · ');
+    return '<p class="ficha-subtitulo" title="' + U.escapar(linea) + '">' + U.escapar(linea) + '</p>';
+  }
+
+  /* La ficha entera se rehace con innerHTML, y con ella el campo de la
+     nota nueva: el repintado pasa por U.conservandoLoEscrito para que
+     lo que se esté escribiendo, el foco y el cursor sobrevivan
+     (17-sep-2026, fila 34). Y al terminar se apunta la huella de lo
+     que ha quedado en pantalla. */
+  function pintar() {
+    var salida = U.conservandoLoEscrito($('ficha-asunto-cuerpo'), pintarLaFicha);
+    if (N.actual) N.apuntarHuella();
+    return salida;
+  }
+
+  function pintarLaFicha() {
+    var a = N.actual;
+    var caja = $('ficha-asunto-cuerpo');
+    if (!a || !caja) return;
+    var abierto = (N.modoActual === 'abierto');
+    var tipo = tipoDe(a);
+    var tramite = N.datosDelAsunto(a);
+    if (window.FichaTrabajoVisor) FichaTrabajoVisor.soltar();   /* fila 425: el documento abierto no se pierde con la ficha */
+    /* Fila 449: abierta desde el aviso de «Ver todo», «← Volver» dice adónde lleva. */
+    var origenDeFicha = window.Navegacion ? Navegacion.origen() : null;
+    var vuelveAVerTodo = !!(origenDeFicha && origenDeFicha.verTodo);
+    caja.innerHTML =
+      /* Una sola línea (13-nov-2026, fila 637): volver, tipo, número, el tercero y «⋯»; a la
+         derecha, «Ruta» y «Archivar el asunto». La fila de hitos va debajo (js/ficha-tarjetas.js). */
+      '<header class="ficha-cabecera">' +
+        '<div class="ficha-linea1">' +
+          '<div class="ficha-volver-fila">' +
+            '<button type="button" class="boton" id="ficha-volver" title="' + (vuelveAVerTodo ? 'Volver a Ver todo' : 'Volver a la lista') + '">' + (vuelveAVerTodo ? '← Volver a Ver todo' : '← Volver') + '</button>' +
+            '<div id="ficha-volver-origen"></div>' +
+          '</div>' +
+          '<div class="ficha-marcas">' + marcasDeFicha(a, tipo) + '</div>' +
+          '<h2 class="ficha-nombre"><span class="ficha-nombre-texto" title="' + U.escapar(a.nombre) + '">' + U.escapar(terceroDe(a)) + '</span></h2>' +
+          '<div class="ficha-cab-der">' +
+            '<span class="ficha-generar-enviar" id="ficha-generar-enviar"></span>' +   /* fila 695 */
+            '<span class="ficha-llamada" id="ficha-llamada"></span>' +   /* fila 639 */
+            '<span class="ficha-ruta" id="ficha-ruta"></span>' +
+            '<div class="ficha-archivar" id="ficha-archivar"></div>' +
+          '</div>' +
+        '</div>' +
+      '</header>' +
+      '<div id="ficha-presencia"></div>' +
+      '<div id="ficha-sellos"></div>' +
+      '<div id="ficha-firmas"></div>' +
+      '<div id="ficha-aviso-tipo"></div>' +
+      /* Tarjetas (24-sep-2026, fila 107, docs/FICHA-EN-TARJETAS.md): la
+         cuadrícula, abrir una en grande y la franja de documentos viven
+         en js/ficha-tarjetas.js; los huecos de dentro (#ficha-guia,
+         #ficha-documentos, #ficha-notas…) son los mismos de siempre. */
+      FichaTarjetas.html(tramite, a);
+
+    /* Antes de volver a la lista, si queda una nota sin guardar en la
+       caja de la ficha, avisa (18-sep-2026, fila 58,
+       docs/AJUSTES-DE-USO-2026-09-18.md, 3): esto es lo que pulsa
+       tanto el botón como Escape (js/usabilidad.js, que pulsa este
+       mismo `#ficha-volver`). Solo aquí, no en `volverALaLista()`:
+       esa función también la llama sola `App.reengancharFicha` cuando
+       el asunto ya no está en la lista, y ahí no tiene sentido
+       preguntar nada. */
+    $('ficha-volver').onclick = async function () {
+      if (window.Notas && !(await Notas.confirmarSalirDeFicha())) return;
+      volverALaLista();
+    };
+
+    if (window.GenerarEnviarCabecera) GenerarEnviarCabecera.pintar($('ficha-generar-enviar'), a);   /* fila 695: sin tarea, siempre a la vista */
+    var sitioLlamada = $('ficha-llamada');
+    if (sitioLlamada && window.Llamadas && Llamadas.botonCabecera) sitioLlamada.appendChild(Llamadas.botonCabecera());   /* fila 639: «Apuntar llamada», antes de «Ruta» */
+    var sitioRuta = $('ficha-ruta');
+    if (sitioRuta && window.RutaCarpetas) sitioRuta.appendChild(RutaCarpetas.boton(a, N.modoActual));   /* fila 637: a la vista, junto a «Archivar» */
+    pintarAcciones(a, abierto);
+    N.pintarNotas(a, abierto);
+    N.pintarAvisoDeTipo(a, tipo);
+    N.pintarGuia(a, tipo, abierto);
+    if (window.FichaDatosBloque) FichaDatosBloque.pintar(a);   /* fila 637: el bloque «Datos» */
+    N.pintarDocumentos(a);
+    N.pintarOtrosDelTercero(a);
+    N.pintarRelacionados(a, abierto);
+    if (window.ActividadesFicha) ActividadesFicha.pintar(a);   /* fila 306: la tarjeta «La actividad» */
+    if (window.CandidaturasFicha) CandidaturasFicha.pintar(a);   /* fila 347: la tarjeta «Candidaturas» */
+    N.pintarPresencia();
+    N.pintarSellos(a);
+    if (N.pintarFirmas) N.pintarFirmas(a);   /* fila 515: firmado con otro nombre y pregunta del firmado */
+    if (window.OtrosDelTercero) OtrosDelTercero.pintarVuelta($('ficha-volver-origen'), a);
+    N.asegurarObservadorConsulta();
+    N.aplicarModoConsulta();
+    FichaTarjetas.alPintar(caja, a);
+    if (window.CampoDesdeElAsunto) CampoDesdeElAsunto.alPintar(caja, a);   /* fila 245 */
+  }
+
+
+  /* ---------- la barra de botones ----------
+
+     Son los mismos de la tarjeta. Al terminar cada uno se repinta la
+     ficha, y los que mueven o renombran la carpeta devuelven a la
+     lista, porque el asunto ya no se llama igual. */
+
+  /* La barra de acciones queda en cinco elementos y nada más
+     (18-sep-2026, fila 52, docs/CABECERA-DEL-ASUNTO.md, 3): el
+     hito actual (fila 129; antes, el desplegable de estado), el vencimiento, "El encargo", "Comunicar"
+     (lo añade js/correo.js) y "Archivar"/"Reabrir". "Editar", "Borrar"
+     y "Copiar nombre" viven en el menú de tres puntos del nombre
+     (js/ficha-nombre-acciones.js); "Gestionar documentos", en la
+     cabecera del bloque de documentos (js/ficha-documentos.js). */
+  function pintarAcciones(a, abierto) {
+    var caja = $('ficha-acciones');
+    caja.innerHTML = '';
+
+    if (abierto) {
+      /* Fila 129 y fila 637: ya no sale «Hito N de M · …» (el hito se ve en la fila de hitos). «El encargo» ya no es un
+         botón: quién lo pide y por qué vía están en «Datos». Fila 638: «Esperando a…» y «Ya ha llegado» están en la
+         línea del hito (js/hito-mesa-linea.js); aquí solo queda el vencimiento del asunto. */
+      if (window.EstadoHito) EstadoHito.alAbrirFicha(a);
+
+      var et = Plazos.etiquetaVencimiento(a.ficha.limite);
+      var bplazo = document.createElement('button');
+      bplazo.type = 'button';
+      bplazo.className = 'boton-vencimiento' + (et.clase ? ' ' + et.clase : '');
+      bplazo.textContent = et.texto;
+      bplazo.setAttribute('data-ayuda-clave', 'poner-o-cambiar-la-fecha-limite');
+      bplazo.onclick = async function (ev) {
+        try { await App.editarPlazo(a, ev.currentTarget); } finally { App.repintarAccionesFicha(); }
+      };
+      caja.appendChild(bplazo);
+
+    }
+
+    /* "Comunicar" (js/correo.js) entra aquí, y "Archivar"/"Reabrir" se
+       queda el último, pegado al borde derecho. */
+    /* Fila 249: en un tipo que hay que liquidar, el botón dice «Pasar a Por liquidar». */
+    var pasaAPorLiquidar = abierto && window.PorLiquidar && PorLiquidar.exige(a) && !PorLiquidar.estaPorLiquidar(a);
+    var yaPorLiquidar = abierto && window.PorLiquidar && PorLiquidar.exige(a) && PorLiquidar.estaPorLiquidar(a);
+    var cerrar = boton(abierto ? (pasaAPorLiquidar ? 'Pasar a Por liquidar' : yaPorLiquidar ? 'Ir a Por liquidar' : 'Cerrar el asunto') : 'Reabrir el asunto',
+      abierto ? (pasaAPorLiquidar ? 'Dejarlo en la pestaña «Por liquidar» de Inicio' : yaPorLiquidar ? 'Se liquida y se cierra desde la pestaña «Por liquidar» de Inicio' : 'Llevar la carpeta al ARCHIVO') : '', async function (ev) {
+      await U.mientrasGuarda(ev.currentTarget, function () {
+        if (!abierto) return App.reabrirAsunto(a);
+        if (pasaAPorLiquidar) return PorLiquidar.archivarOPasar(a);
+        if (yaPorLiquidar) { if (window.InicioTabla) InicioTabla.cambiar('liq'); return Promise.resolve(); }
+        return ArchivarFondo.archivar(a);
+      });
+      /* Reabierto: a su ficha de asunto abierto (fila 119). */
+      if (!abierto && window.Navegacion && Navegacion.abrirAbierto(a.nombre)) return;
+      volverALaLista();
+    });
+    cerrar.classList.add('boton-principal');
+    /* En la primera línea de la cabecera, a la derecha (fila 112). */
+    var sitioArchivar = $('ficha-archivar');
+    if (sitioArchivar) { sitioArchivar.innerHTML = ''; sitioArchivar.appendChild(cerrar); }
+    else caja.appendChild(cerrar);
+  }
+
+  function boton(texto, ayuda, alPulsar, marcado) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'boton' + (marcado ? ' boton-marcado' : '');
+    b.textContent = texto;
+    if (ayuda) b.title = ayuda;
+    b.onclick = alPulsar;
+    return b;
+  }
+
+  Object.assign(N, {
+    boton: boton,
+    fichaVisible: fichaVisible,
+    filasHtml: filasHtml,
+    pintar: pintar,
+    tipoDe: tipoDe,
+    volverALaLista: volverALaLista
+  });
+})();
