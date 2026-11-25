@@ -14,6 +14,7 @@
     // Conflictos._interno.
     'js/conflictos-datos.js',
     'js/conflictos-diferencias.js',
+    'js/recurrentes-tercero.js',
     'js/recurrentes.js',
     'js/guias-enganche.js',
     // El modelo de los hitos de un asunto: después de js/guias.js y de
@@ -389,5 +390,5 @@
     // js/correo-enviar.js (fila 115, 24-sep-2026,
     // docs/ENVIAR-DESDE-EL-ASUNTO.md): habla con la aplicación web de
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-14-42"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-15-33"><\/script>'; }).join('\n') + '\n');
 }());
