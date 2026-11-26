@@ -49,10 +49,14 @@
     'js/cuentas-informe.js',
     // Fila 750 (docs/583-COMPRAS-DE-MATERIAL.md): «Material», catálogo y lo que falta. Los datos primero; las pestañas se registran en la pantalla.
     'js/material-datos.js',
+    // Fila 751 (parte 2): precios y proveedores; antes de la pantalla (el estado los lleva).
+    'js/material-precios.js',
     'js/material-pantalla.js',
     'js/material-cuadros.js',
     'js/material-catalogo.js',
     'js/material-falta.js',
+    'js/material-precios-ui.js',
+    'js/material-proveedores.js',
     'js/notas.js',
     // Fila 89, docs/COPIA-SIN-INTERNET.md: leer un dato estático (JSON o
     // binario) tanto por http(s) (fetch) como abierto desde el disco
@@ -397,5 +401,5 @@
     // js/correo-enviar.js (fila 115, 24-sep-2026,
     // docs/ENVIAR-DESDE-EL-ASUNTO.md): habla con la aplicación web de
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-03-39"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-04-41"><\/script>'; }).join('\n') + '\n');
 }());
