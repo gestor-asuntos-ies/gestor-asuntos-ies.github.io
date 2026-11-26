@@ -83,6 +83,7 @@
     'js/contexto-documentos.js',
     'js/documentos-sueltos-sugerencias.js',
     'js/documentos-sueltos-lector.js',
+    'js/documentos-sueltos-numero.js',   // fila 760: «Es de» en «Por clasificar»; va después del lector
     'js/verificacion.js',
     'js/registro.js',
     'js/registro-sellado.js',
@@ -406,5 +407,5 @@
     // js/correo-enviar.js (fila 115, 24-sep-2026,
     // docs/ENVIAR-DESDE-EL-ASUNTO.md): habla con la aplicación web de
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-14-39"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-20-04"><\/script>'; }).join('\n') + '\n');
 }());
