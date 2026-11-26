@@ -391,5 +391,5 @@
     // js/correo-enviar.js (fila 115, 24-sep-2026,
     // docs/ENVIAR-DESDE-EL-ASUNTO.md): habla con la aplicación web de
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-21-41"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-03-21"><\/script>'; }).join('\n') + '\n');
 }());

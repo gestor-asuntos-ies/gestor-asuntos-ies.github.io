@@ -78,6 +78,7 @@
     'js/documento-tarea-bloque.js',
     'js/hay-que-registrarlo.js',
     'js/bandeja-a-asunto.js',
+    'js/tarea-coger-de-bandeja.js',   // fila 646: la usa js/hito-mesa-guion.js
     'js/registro-abrir-pdf.js',
     'js/donde-se-guarda.js',
     'js/donde-se-guarda-tareas.js',
@@ -362,5 +363,5 @@
     // Fila 731: pasar a la dirección nueva (botón en la de siempre y lista de carpetas por señalar en la nueva). Después de js/nucleo.js.
     'js/pasar-a-direccion-nueva.js',
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=25-nov-2026-21-41"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-03-21"><\/script>'; }).join('\n') + '\n');
 }());
