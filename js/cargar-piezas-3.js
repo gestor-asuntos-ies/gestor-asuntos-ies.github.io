@@ -186,6 +186,7 @@
     'js/campos-de-hito.js',
     'js/campo-desde-el-asunto-escribir.js',   // fila 530
     'js/persona-del-asunto.js',               // fila 747
+    'js/persona-del-asunto-calidad.js',       // fila 773
     'js/campo-desde-el-asunto.js',
     // Fila 530 (docs/530-DATOS-EN-EL-ASUNTO.md): los datos que piden las plantillas se escriben en el asunto.
     'js/datos-del-asunto.js',
@@ -363,5 +364,5 @@
     // Fila 731: pasar a la dirección nueva (botón en la de siempre y lista de carpetas por señalar en la nueva). Después de js/nucleo.js.
     'js/pasar-a-direccion-nueva.js',
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-04-06"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-08-01"><\/script>'; }).join('\n') + '\n');
 }());
