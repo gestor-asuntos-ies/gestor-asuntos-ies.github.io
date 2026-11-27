@@ -229,5 +229,5 @@
     'js/inicio-plegados.js',
     'js/avisos-linea.js',
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-11-20"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-16-08"><\/script>'; }).join('\n') + '\n');
 }());
