@@ -125,6 +125,7 @@
     // App.abrirFicha) y de js/ficha-menus.js (usa FichaMenus.montar).
     // Fila 98 (docs/COPIAR-LA-RUTA-DE-LA-CARPETA.md): el botón «Ruta» que
     // pone js/ficha-nombre-acciones.js, y su bloque en Ajustes → El centro.
+    'js/ruta-chromebook.js',   // fila 770: «Ruta» y «Abrir en Drive» en un Chromebook
     'js/copiar-ruta.js',
     'js/extracto-documento.js',   // fila 627: «Extracto» de cada documento, al lado de «Ruta»
     'js/largo-de-rutas.js',
@@ -407,5 +408,5 @@
     // js/correo-enviar.js (fila 115, 24-sep-2026,
     // docs/ENVIAR-DESDE-EL-ASUNTO.md): habla con la aplicación web de
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-11-07"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-11-10"><\/script>'; }).join('\n') + '\n');
 }());
