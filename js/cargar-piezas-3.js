@@ -363,5 +363,5 @@
     // Fila 731: pasar a la dirección nueva (botón en la de siempre y lista de carpetas por señalar en la nueva). Después de js/nucleo.js.
     'js/pasar-a-direccion-nueva.js',
   ];
-  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=26-nov-2026-20-04"><\/script>'; }).join('\n') + '\n');
+  document.write(piezas.map(function (f) { return '<script src="' + f + '?v=27-nov-2026-04-06"><\/script>'; }).join('\n') + '\n');
 }());
